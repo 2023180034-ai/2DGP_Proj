@@ -10,18 +10,22 @@ FRAME_HEIGHT = 128
 FRAME_COUNT = 12
 RUN_FRAME_COUNT = 8
 ROLL_FRAME_COUNT = 10
+ATTACK_FRAME_COUNT = 12
 ANIMATION_FPS = 8
 RUN_ANIMATION_FPS = 12
 ROLL_ANIMATION_FPS = 20
+ATTACK_ANIMATION_FPS = 12
 MOVE_SPEED = 300
 RUN_SPEED_MULTIPLIER = 1.3
 ROLL_DURATION = ROLL_FRAME_COUNT / ROLL_ANIMATION_FPS
 ROLL_SPEED_MULTIPLIER = 2
+ATTACK_DURATION = ATTACK_FRAME_COUNT / ATTACK_ANIMATION_FPS
 
 SPRITE_DIRECTORY = Path(__file__).resolve().parent.parent / "sprites" / "player"
 
 _RUN_KEYS = {pico2d.SDLK_LSHIFT, pico2d.SDLK_RSHIFT}
 _ROLL_KEY = pico2d.SDLK_SPACE
+_ATTACK_KEY = pico2d.SDLK_z
 _DIRECTION_KEYS = {
     pico2d.SDLK_DOWN: (0, -1, 0),
     pico2d.SDLK_RIGHT: (1, 0, 1),
@@ -51,12 +55,16 @@ class Player:
         self.roll_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "player_roll.png")
         )
+        self.attack_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "player_attack.png")
+        )
 
         self.x = pico2d.get_canvas_width() / 2
         self.y = pico2d.get_canvas_height() / 2
         self.direction = 0
         self.pressed_keys = []
         self.roll_key_held = False
+        self.attack_key_held = False
         self.run_pressed = False
         self.animation_time = 0
         self.last_update = time.perf_counter()
@@ -65,6 +73,8 @@ class Player:
         self.roll_elapsed = 0
         self.roll_dx = 0
         self.roll_dy = 0
+        self.attacking = False
+        self.attack_elapsed = 0
 
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == _ROLL_KEY:
@@ -73,6 +83,12 @@ class Player:
                 self._start_roll()
         elif event.type == pico2d.SDL_KEYUP and event.key == _ROLL_KEY:
             self.roll_key_held = False
+        elif event.type == pico2d.SDL_KEYDOWN and event.key == _ATTACK_KEY:
+            if not self.attack_key_held:
+                self.attack_key_held = True
+                self._start_attack()
+        elif event.type == pico2d.SDL_KEYUP and event.key == _ATTACK_KEY:
+            self.attack_key_held = False
         elif event.type == pico2d.SDL_KEYDOWN and event.key in _RUN_KEYS:
             self.run_pressed = True
         elif event.type == pico2d.SDL_KEYUP and event.key in _RUN_KEYS:
@@ -89,7 +105,7 @@ class Player:
         return self.rolling
 
     def _start_roll(self):
-        if self.rolling:
+        if self.rolling or self.attacking:
             return
 
         dx = 0
@@ -110,6 +126,18 @@ class Player:
         self.rolling = True
         self.roll_elapsed = 0
 
+    def _start_attack(self):
+        if self.rolling or self.attacking:
+            return
+
+        for key in self.pressed_keys:
+            key_dx, key_dy, direction = _DIRECTION_KEYS[key]
+            if key_dx or key_dy:
+                self.direction = direction
+
+        self.attacking = True
+        self.attack_elapsed = 0
+
     def update(self):
         now = time.perf_counter()
         delta_time = min(now - self.last_update, 0.1)
@@ -123,6 +151,11 @@ class Player:
             if self.roll_elapsed >= ROLL_DURATION - 1e-9:
                 self.roll_elapsed = ROLL_DURATION
                 self.rolling = False
+        elif self.attacking:
+            self.attack_elapsed += delta_time
+            if self.attack_elapsed >= ATTACK_DURATION - 1e-9:
+                self.attack_elapsed = ATTACK_DURATION
+                self.attacking = False
         else:
             dx = 0
             dy = 0
@@ -154,6 +187,12 @@ class Player:
             frame = min(
                 int(self.roll_elapsed * ROLL_ANIMATION_FPS),
                 ROLL_FRAME_COUNT - 1,
+            )
+        elif self.attacking:
+            sprite = self.attack_sprite
+            frame = min(
+                int(self.attack_elapsed * ATTACK_ANIMATION_FPS),
+                ATTACK_FRAME_COUNT - 1,
             )
         elif self.moving and self.run_pressed:
             sprite = self.run_sprite
