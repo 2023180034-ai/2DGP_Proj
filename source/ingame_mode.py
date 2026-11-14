@@ -6,8 +6,10 @@ import pico2d
 from camera import Camera
 import game_framework
 from map_select_mode import MapSelectMode
-from player import Player
+from player import DIRECTION_UP, Player
 
+
+CAMERA_ZOOM = 1.15
 
 MAP_IMAGE_PATHS = {
     "test": Path(__file__).resolve().parent.parent
@@ -32,10 +34,24 @@ class IngameMode(game_framework.Mode):
         self.background_scale = max(
             canvas_width / background.w,
             canvas_height / background.h,
-        )
+        ) * CAMERA_ZOOM
         world_width = background.w * self.background_scale
         world_height = background.h * self.background_scale
-        self.player = Player(world_width, world_height)
+        spawn_x = world_width / 2
+        spawn_y = world_height / 2
+        spawn_direction = 0
+        if map_id == "boss1":
+            spawn_y = world_height * 0.15
+            spawn_direction = DIRECTION_UP
+
+        self.player = Player(
+            world_width,
+            world_height,
+            spawn_x=spawn_x,
+            spawn_y=spawn_y,
+            direction=spawn_direction,
+            world_scale=CAMERA_ZOOM,
+        )
         self.camera = Camera(
             world_width,
             world_height,

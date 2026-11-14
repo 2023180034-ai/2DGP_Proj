@@ -21,6 +21,7 @@ ROLL_DURATION = ROLL_FRAME_COUNT / ROLL_ANIMATION_FPS
 ROLL_SPEED_MULTIPLIER = 2
 ATTACK_DURATION = ATTACK_FRAME_COUNT / ATTACK_ANIMATION_FPS
 BASE_SCREEN_HEIGHT = 600
+DIRECTION_UP = 3
 
 SPRITE_DIRECTORY = Path(__file__).resolve().parent.parent / "sprites" / "player"
 
@@ -31,7 +32,7 @@ _DIRECTION_KEYS = {
     pico2d.SDLK_DOWN: (0, -1, 0),
     pico2d.SDLK_RIGHT: (1, 0, 1),
     pico2d.SDLK_LEFT: (-1, 0, 2),
-    pico2d.SDLK_UP: (0, 1, 3),
+    pico2d.SDLK_UP: (0, 1, DIRECTION_UP),
 }
 _SPRITE_ROW_BY_DIRECTION = (0, 2, 1, 3)
 _DIRECTION_VECTOR_BY_DIRECTION = (
@@ -43,7 +44,15 @@ _DIRECTION_VECTOR_BY_DIRECTION = (
 
 
 class Player:
-    def __init__(self, world_width=None, world_height=None):
+    def __init__(
+        self,
+        world_width=None,
+        world_height=None,
+        spawn_x=None,
+        spawn_y=None,
+        direction=0,
+        world_scale=1.0,
+    ):
         self.idle_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "player_idle.png")
         )
@@ -66,9 +75,10 @@ class Player:
         self.world_height = (
             pico2d.get_canvas_height() if world_height is None else world_height
         )
-        self.x = self.world_width / 2
-        self.y = self.world_height / 2
-        self.direction = 0
+        self.world_scale = world_scale
+        self.x = self.world_width / 2 if spawn_x is None else spawn_x
+        self.y = self.world_height / 2 if spawn_y is None else spawn_y
+        self.direction = direction
         self.pressed_keys = []
         self.roll_key_held = False
         self.attack_key_held = False
@@ -155,7 +165,9 @@ class Player:
         now = time.perf_counter()
         delta_time = min(now - self.last_update, 0.1)
         self.last_update = now
-        screen_scale = pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT
+        screen_scale = (
+            pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT * self.world_scale
+        )
 
         if self.rolling:
             roll_delta = min(delta_time, ROLL_DURATION - self.roll_elapsed)
@@ -203,7 +215,9 @@ class Player:
         self.animation_time += delta_time
 
     def draw(self, camera_x=0, camera_y=0):
-        screen_scale = pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT
+        screen_scale = (
+            pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT * self.world_scale
+        )
         if self.rolling:
             sprite = self.roll_sprite
             frame = min(
