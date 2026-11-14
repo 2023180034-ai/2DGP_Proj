@@ -1,4 +1,5 @@
 import pico2d
+import pico2d.pico2d as pico2d_core
 
 
 SCREEN_WIDTH = 800
@@ -73,9 +74,17 @@ def run(start_mode):
     if _running:
         raise RuntimeError("The game framework is already running.")
 
-    pico2d.open_canvas(SCREEN_WIDTH, SCREEN_HEIGHT, full=True)
+    pico2d.open_canvas(SCREEN_WIDTH, SCREEN_HEIGHT)
     _running = True
     try:
+        pico2d_core.SDL_SetWindowResizable(pico2d_core.window, True)
+        if pico2d_core.SDL_RenderSetLogicalSize(
+            pico2d_core.renderer, SCREEN_WIDTH, SCREEN_HEIGHT
+        ) != 0:
+            error = pico2d_core.SDL_GetError().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Could not set the game canvas size: {error}")
+        pico2d_core.SDL_MaximizeWindow(pico2d_core.window)
+
         start_mode.enter()
         _mode_stack.append(start_mode)
 
