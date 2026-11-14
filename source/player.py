@@ -17,11 +17,13 @@ ROLL_ANIMATION_FPS = 20
 ATTACK_ANIMATION_FPS = 12
 MOVE_SPEED = 300
 RUN_SPEED_MULTIPLIER = 1.3
+ATTACK_MOVE_SPEED_MULTIPLIER = 0.7
 ROLL_DURATION = ROLL_FRAME_COUNT / ROLL_ANIMATION_FPS
 ROLL_SPEED_MULTIPLIER = 2
 ATTACK_DURATION = ATTACK_FRAME_COUNT / ATTACK_ANIMATION_FPS
 BASE_SCREEN_HEIGHT = 600
 DIRECTION_UP = 3
+WALL_COLLISION_CLEARANCE = 32
 
 SPRITE_DIRECTORY = Path(__file__).resolve().parent.parent / "sprites" / "player"
 
@@ -52,6 +54,7 @@ class Player:
         spawn_y=None,
         direction=0,
         world_scale=1.0,
+        north_boundary=None,
     ):
         self.idle_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "player_idle.png")
@@ -68,6 +71,9 @@ class Player:
         self.attack_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "player_attack.png")
         )
+        self.walk_attack_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "player_walk_attack.png")
+        )
 
         self.world_width = (
             pico2d.get_canvas_width() if world_width is None else world_width
@@ -76,6 +82,7 @@ class Player:
             pico2d.get_canvas_height() if world_height is None else world_height
         )
         self.world_scale = world_scale
+        self.north_boundary = north_boundary
         self.x = self.world_width / 2 if spawn_x is None else spawn_x
         self.y = self.world_height / 2 if spawn_y is None else spawn_y
         self.direction = direction
@@ -178,11 +185,6 @@ class Player:
             if self.roll_elapsed >= ROLL_DURATION - 1e-9:
                 self.roll_elapsed = ROLL_DURATION
                 self.rolling = False
-        elif self.attacking:
-            self.attack_elapsed += delta_time
-            if self.attack_elapsed >= ATTACK_DURATION - 1e-9:
-                self.attack_elapsed = ATTACK_DURATION
-                self.attacking = False
         else:
             dx = 0
             dy = 0
@@ -195,22 +197,36 @@ class Player:
 
             self.moving = dx != 0 or dy != 0
             if self.moving:
-                speed = MOVE_SPEED * (
-                    RUN_SPEED_MULTIPLIER if self.run_pressed else 1
-                ) * screen_scale
+                if self.attacking:
+                    speed_multiplier = ATTACK_MOVE_SPEED_MULTIPLIER
+                else:
+                    speed_multiplier = (
+                        RUN_SPEED_MULTIPLIER if self.run_pressed else 1
+                    )
+                speed = MOVE_SPEED * speed_multiplier * screen_scale
                 distance = speed * delta_time / math.hypot(dx, dy)
                 self.x += dx * distance
                 self.y += dy * distance
 
+        if self.attacking:
+            self.attack_elapsed += delta_time
+            if self.attack_elapsed >= ATTACK_DURATION - 1e-9:
+                self.attack_elapsed = ATTACK_DURATION
+                self.attacking = False
+
         player_width = FRAME_WIDTH * screen_scale
         player_height = FRAME_HEIGHT * screen_scale
+        max_y = self.world_height - player_height / 2
+        if self.north_boundary is not None:
+            wall_clearance = WALL_COLLISION_CLEARANCE * screen_scale
+            max_y = min(max_y, self.north_boundary - wall_clearance)
         self.x = min(
             max(self.x, player_width / 2),
             self.world_width - player_width / 2,
         )
         self.y = min(
             max(self.y, player_height / 2),
-            self.world_height - player_height / 2,
+            max_y,
         )
         self.animation_time += delta_time
 
@@ -225,7 +241,7 @@ class Player:
                 ROLL_FRAME_COUNT - 1,
             )
         elif self.attacking:
-            sprite = self.attack_sprite
+            sprite = self.walk_attack_sprite if self.moving else self.attack_sprite
             frame = min(
                 int(self.attack_elapsed * ATTACK_ANIMATION_FPS),
                 ATTACK_FRAME_COUNT - 1,

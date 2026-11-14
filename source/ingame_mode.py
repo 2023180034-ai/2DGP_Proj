@@ -10,6 +10,7 @@ from player import DIRECTION_UP, Player
 
 
 CAMERA_ZOOM = 1.15
+BOSS1_WALL_BOTTOM_RATIO = 0.20
 
 MAP_IMAGE_PATHS = {
     "test": Path(__file__).resolve().parent.parent
@@ -40,9 +41,11 @@ class IngameMode(game_framework.Mode):
         spawn_x = world_width / 2
         spawn_y = world_height / 2
         spawn_direction = 0
+        north_boundary = None
         if map_id == "boss1":
             spawn_y = world_height * 0.15
             spawn_direction = DIRECTION_UP
+            north_boundary = world_height * (1 - BOSS1_WALL_BOTTOM_RATIO)
 
         self.player = Player(
             world_width,
@@ -51,6 +54,7 @@ class IngameMode(game_framework.Mode):
             spawn_y=spawn_y,
             direction=spawn_direction,
             world_scale=CAMERA_ZOOM,
+            north_boundary=north_boundary,
         )
         self.camera = Camera(
             world_width,
