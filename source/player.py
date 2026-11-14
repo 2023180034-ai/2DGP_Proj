@@ -20,6 +20,7 @@ RUN_SPEED_MULTIPLIER = 1.3
 ROLL_DURATION = ROLL_FRAME_COUNT / ROLL_ANIMATION_FPS
 ROLL_SPEED_MULTIPLIER = 2
 ATTACK_DURATION = ATTACK_FRAME_COUNT / ATTACK_ANIMATION_FPS
+BASE_SCREEN_HEIGHT = 600
 
 SPRITE_DIRECTORY = Path(__file__).resolve().parent.parent / "sprites" / "player"
 
@@ -142,11 +143,13 @@ class Player:
         now = time.perf_counter()
         delta_time = min(now - self.last_update, 0.1)
         self.last_update = now
+        screen_scale = pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT
 
         if self.rolling:
             roll_delta = min(delta_time, ROLL_DURATION - self.roll_elapsed)
-            self.x += self.roll_dx * MOVE_SPEED * ROLL_SPEED_MULTIPLIER * roll_delta
-            self.y += self.roll_dy * MOVE_SPEED * ROLL_SPEED_MULTIPLIER * roll_delta
+            roll_speed = MOVE_SPEED * ROLL_SPEED_MULTIPLIER * screen_scale
+            self.x += self.roll_dx * roll_speed * roll_delta
+            self.y += self.roll_dy * roll_speed * roll_delta
             self.roll_elapsed += roll_delta
             if self.roll_elapsed >= ROLL_DURATION - 1e-9:
                 self.roll_elapsed = ROLL_DURATION
@@ -170,18 +173,21 @@ class Player:
             if self.moving:
                 speed = MOVE_SPEED * (
                     RUN_SPEED_MULTIPLIER if self.run_pressed else 1
-                )
+                ) * screen_scale
                 distance = speed * delta_time / math.hypot(dx, dy)
                 self.x += dx * distance
                 self.y += dy * distance
 
+        player_width = FRAME_WIDTH * screen_scale
+        player_height = FRAME_HEIGHT * screen_scale
         canvas_width = pico2d.get_canvas_width()
         canvas_height = pico2d.get_canvas_height()
-        self.x = min(max(self.x, FRAME_WIDTH / 2), canvas_width - FRAME_WIDTH / 2)
-        self.y = min(max(self.y, FRAME_HEIGHT / 2), canvas_height - FRAME_HEIGHT / 2)
+        self.x = min(max(self.x, player_width / 2), canvas_width - player_width / 2)
+        self.y = min(max(self.y, player_height / 2), canvas_height - player_height / 2)
         self.animation_time += delta_time
 
     def draw(self):
+        screen_scale = pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT
         if self.rolling:
             sprite = self.roll_sprite
             frame = min(
@@ -212,6 +218,6 @@ class Player:
             FRAME_HEIGHT,
             self.x,
             self.y,
-            FRAME_WIDTH,
-            FRAME_HEIGHT,
+            FRAME_WIDTH * screen_scale,
+            FRAME_HEIGHT * screen_scale,
         )

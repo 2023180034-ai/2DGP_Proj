@@ -2,8 +2,8 @@ import pico2d
 import pico2d.pico2d as pico2d_core
 
 
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
+SCREEN_WIDTH = 1980
+SCREEN_HEIGHT = 1080
 FRAME_RATE = 60
 
 _mode_stack = []
