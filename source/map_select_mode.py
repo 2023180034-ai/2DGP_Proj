@@ -12,6 +12,10 @@ PANEL_IMAGE_PATH = (
     / "map_select_panel.png"
 )
 BASE_SCREEN_HEIGHT = 600
+MAP_BUTTONS = {
+    "test": (30, 30, 270, 86),
+    "boss1": (30, 102, 270, 158),
+}
 
 
 class MapSelectMode(game_framework.Mode):
@@ -23,6 +27,16 @@ class MapSelectMode(game_framework.Mode):
         self.panel = pico2d.load_image(str(PANEL_IMAGE_PATH))
 
     def handle_event(self, event):
+        if (
+            event.type == pico2d.SDL_MOUSEBUTTONDOWN
+            and event.button == pico2d.SDL_BUTTON_LEFT
+        ):
+            map_id = self._map_at_position(event.x, event.y)
+            if map_id is not None:
+                self.ingame_mode.reset_map(map_id)
+                game_framework.pop_mode()
+            return
+
         if event.type == pico2d.SDL_KEYUP and event.key == pico2d.SDLK_m:
             self.open_key_held = False
             return
@@ -37,6 +51,22 @@ class MapSelectMode(game_framework.Mode):
             game_framework.pop_mode()
         else:
             return
+
+    def _map_at_position(self, x, y):
+        scale = pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT
+        panel_left = (
+            pico2d.get_canvas_width() - self.panel.w * scale
+        ) / 2
+        panel_top = (
+            pico2d.get_canvas_height() - self.panel.h * scale
+        ) / 2
+        panel_x = (x - panel_left) / scale
+        panel_y = (y - panel_top) / scale
+
+        for map_id, (left, top, right, bottom) in MAP_BUTTONS.items():
+            if left <= panel_x <= right and top <= panel_y <= bottom:
+                return map_id
+        return None
 
     def update(self):
         pass

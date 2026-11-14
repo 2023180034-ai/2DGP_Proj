@@ -7,15 +7,27 @@ from map_select_mode import MapSelectMode
 from player import Player
 
 
-MAP_IMAGE_PATH = (
-    Path(__file__).resolve().parent.parent / "sprites" / "map" / "test_map.png"
-)
+MAP_IMAGE_PATHS = {
+    "test": Path(__file__).resolve().parent.parent
+    / "sprites"
+    / "map"
+    / "test_map.png",
+    "boss1": Path(__file__).resolve().parent.parent
+    / "sprites"
+    / "map"
+    / "boss1_map.png",
+}
 
 
 class IngameMode(game_framework.Mode):
     def enter(self):
-        self.background = pico2d.load_image(str(MAP_IMAGE_PATH))
+        self.reset_map("test")
+
+    def reset_map(self, map_id):
+        background = pico2d.load_image(str(MAP_IMAGE_PATHS[map_id]))
         self.player = Player()
+        self.current_map_id = map_id
+        self.background = background
 
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_ESCAPE:
