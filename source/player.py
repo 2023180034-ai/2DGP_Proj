@@ -101,6 +101,12 @@ class Player:
             if event.key in self.pressed_keys:
                 self.pressed_keys.remove(event.key)
 
+    def clear_input(self):
+        self.pressed_keys.clear()
+        self.roll_key_held = False
+        self.attack_key_held = False
+        self.run_pressed = False
+
     @property
     def is_invulnerable(self):
         return self.rolling
