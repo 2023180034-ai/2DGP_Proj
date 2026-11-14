@@ -43,7 +43,7 @@ _DIRECTION_VECTOR_BY_DIRECTION = (
 
 
 class Player:
-    def __init__(self):
+    def __init__(self, world_width=None, world_height=None):
         self.idle_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "player_idle.png")
         )
@@ -60,8 +60,14 @@ class Player:
             str(SPRITE_DIRECTORY / "player_attack.png")
         )
 
-        self.x = pico2d.get_canvas_width() / 2
-        self.y = pico2d.get_canvas_height() / 2
+        self.world_width = (
+            pico2d.get_canvas_width() if world_width is None else world_width
+        )
+        self.world_height = (
+            pico2d.get_canvas_height() if world_height is None else world_height
+        )
+        self.x = self.world_width / 2
+        self.y = self.world_height / 2
         self.direction = 0
         self.pressed_keys = []
         self.roll_key_held = False
@@ -186,13 +192,17 @@ class Player:
 
         player_width = FRAME_WIDTH * screen_scale
         player_height = FRAME_HEIGHT * screen_scale
-        canvas_width = pico2d.get_canvas_width()
-        canvas_height = pico2d.get_canvas_height()
-        self.x = min(max(self.x, player_width / 2), canvas_width - player_width / 2)
-        self.y = min(max(self.y, player_height / 2), canvas_height - player_height / 2)
+        self.x = min(
+            max(self.x, player_width / 2),
+            self.world_width - player_width / 2,
+        )
+        self.y = min(
+            max(self.y, player_height / 2),
+            self.world_height - player_height / 2,
+        )
         self.animation_time += delta_time
 
-    def draw(self):
+    def draw(self, camera_x=0, camera_y=0):
         screen_scale = pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT
         if self.rolling:
             sprite = self.roll_sprite
@@ -222,8 +232,8 @@ class Player:
             bottom,
             FRAME_WIDTH,
             FRAME_HEIGHT,
-            self.x,
-            self.y,
+            self.x - camera_x,
+            self.y - camera_y,
             FRAME_WIDTH * screen_scale,
             FRAME_HEIGHT * screen_scale,
         )
