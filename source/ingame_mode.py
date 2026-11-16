@@ -12,6 +12,7 @@ from boss import (
 from camera import Camera
 import direction as dirs
 import game_framework
+from game_over import GameOverUI
 from gold_display import GoldDisplay
 from hp_bar import BossHpBar, PlayerHpBar
 from map_select_mode import MapSelectMode
@@ -42,6 +43,7 @@ class IngameMode(game_framework.Mode):
     def enter(self):
         # 골드는 맵을 바꿔도 유지된다 (게임을 끄면 사라짐, 저장은 아직 없음)
         self.gold_ui = GoldDisplay(gold=0)
+        self.game_over = GameOverUI()
         self.reset_map("test")
 
     def reset_map(self, map_id):
@@ -101,19 +103,37 @@ class IngameMode(game_framework.Mode):
         # 이번 도전에서 보스에게 입힌 피해. 플레이어나 보스가 죽으면 골드로 정산
         self.run_damage = 0
         self.run_settled = False
+        self.game_over.stop()
 
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_ESCAPE:
             game_framework.quit()
+        elif self.game_over.active:
+            self._handle_game_over_event(event)
         elif event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_m:
             game_framework.push_mode(MapSelectMode(self))
         elif not self.player.is_dead:
             self.player.handle_event(event)
 
+    def _handle_game_over_event(self, event):
+        """사망 화면 버튼. 사망 중에는 플레이어 조작과 맵 선택(M)을 막는다."""
+        result = self.game_over.handle_event(event)
+        if result == "restart":
+            self.reset_map("boss1")
+        elif result == "quit":
+            game_framework.quit()
+        # "upgrade"(강화)는 아직 연결하지 않음
+
     def pause(self):
         self.player.clear_input()
 
     def update(self, delta_time):
+        if self.game_over.active:
+            # 사망 화면 동안 게임은 멈추고, 사망 화면과 골드 표시만 움직인다.
+            self.game_over.update()
+            self.gold_ui.update()
+            return
+
         player = self.player
         boss = self.boss
         previous_player_x = player.x
@@ -140,6 +160,8 @@ class IngameMode(game_framework.Mode):
             self.boss_hp_bar.update(delta_time)
             if player.is_dead or boss.is_dead:
                 self._settle_run()
+            if player.is_dead:
+                self.game_over.start()
 
         self.player_hp_bar.update(delta_time)
         self.gold_ui.update()
@@ -197,4 +219,6 @@ class IngameMode(game_framework.Mode):
         self.player_hp_bar.draw()
         if self.boss_hp_bar is not None:
             self.boss_hp_bar.draw()
+        self.game_over.draw()
+        # 골드는 사망 화면(어두운 막) 위에 그려서 계속 또렷하게 보이게 한다.
         self.gold_ui.draw()
