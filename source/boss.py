@@ -81,6 +81,27 @@ CHARGE_SPEED = 300
 CHARGE_HIT_MARGIN = 4
 CHARGE_COOLDOWN = 12.0
 BOSS1_CHARGE_DAMAGE = 150
+JUMP_FRAME_WIDTH = 128
+JUMP_FRAME_HEIGHT = 128
+JUMP_FOOT_Y = 118
+JUMP_FRAME_COUNT = 13
+JUMP_ANIMATION_FPS = 12
+JUMP_LIFTOFF_FRAME = 9  # 이 프레임에서 보스가 화면 위로 사라진다
+JUMP_TAKEOFF_DURATION = JUMP_LIFTOFF_FRAME / JUMP_ANIMATION_FPS
+JUMP_AIR_DURATION = 1.2  # 공중에 있는 시간 (착지 그림자 예고 시간)
+JUMP_TRACK_DURATION = 0.6  # 도약 준비 + 공중 시간 앞부분까지 플레이어를 따라가고 이후 고정
+LAND_FRAME_COUNT = 12
+LAND_ANIMATION_FPS = 12
+LAND_IMPACT_FRAME = 3
+LAND_IMPACT_FRAME_END = 4
+LAND_SHADOW_FRAME_COUNT = 8
+# 그림자 마지막 프레임 타원: 가로 반지름 27.5px, 세로 반지름 8px (발 위치 중심)
+LAND_SHADOW_RADIUS_X = 27.5
+LAND_SHADOW_RADIUS_Y = 8
+LAND_SHADOW_DRAW_SCALE = 1.75
+JUMP_MIN_RANGE = 150  # 약 8.7m 이상 떨어져 있어야 점프 사용
+JUMP_COOLDOWN = 15.0
+BOSS1_JUMP_DAMAGE = 120
 BOSS1_MAX_HP = 10_000
 BOSS_STANDOFF_DISTANCE = 16
 TIME_EPSILON = 1e-9
@@ -135,6 +156,15 @@ class Boss:
         self.charge_warning_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "boss1_charge_warning.png")
         )
+        self.jump_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "boss1_jump.png")
+        )
+        self.land_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "boss1_land.png")
+        )
+        self.land_shadow_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "boss1_land_shadow.png")
+        )
         self.world_width = world_width
         self.world_height = world_height
         self.north_boundary = north_boundary
@@ -174,6 +204,13 @@ class Boss:
         self.charge_traveled = 0
         self.charge_hit_applied = False
         self.charge_cooldown = 0
+        # 점프: None -> "takeoff" -> "air" -> "land" -> None
+        self.jump_state = None
+        self.jump_elapsed = 0
+        self.jump_origin = (x, y)
+        self.jump_target = (x, y)
+        self.jump_hit_applied = False
+        self.jump_cooldown = 0
 
     def update(self, player, delta_time):
         self.elapsed_time += delta_time
@@ -190,6 +227,9 @@ class Boss:
             self.slam_cooldown = 0
         if self.charge_cooldown < TIME_EPSILON:
             self.charge_cooldown = 0
+        self.jump_cooldown = max(0, self.jump_cooldown - delta_time)
+        if self.jump_cooldown < TIME_EPSILON:
+            self.jump_cooldown = 0
         self.moving = False
 
         if self.slam_eruption:
@@ -216,6 +256,10 @@ class Boss:
                 SLAM_FRAME_COUNT / SLAM_ANIMATION_FPS
             ):
                 self.slamming = False
+            return
+
+        if self.jump_state is not None:
+            self._update_jump(player, delta_time)
             return
 
         if self.charging:
@@ -279,6 +323,11 @@ class Boss:
                         ranged_attacks.append(self._start_slam_warning)
                     if self.charge_cooldown == 0:
                         ranged_attacks.append(self._start_charge_warning)
+                    if (
+                        distance >= JUMP_MIN_RANGE * self.sprite_scale
+                        and self.jump_cooldown == 0
+                    ):
+                        ranged_attacks.append(self._start_jump)
 
                 if in_sweep_range and self.shield_sweep_cooldown == 0:
                     self._start_sweep_warning()
@@ -346,6 +395,59 @@ class Boss:
         self.charge_traveled += step
         if self.charge_traveled + TIME_EPSILON >= self.charge_length:
             self.charging = False
+
+    def _start_jump(self):
+        self._lock_attack_direction()
+        self.jump_state = "takeoff"
+        self.jump_elapsed = 0
+        self.jump_cooldown = JUMP_COOLDOWN
+
+    def _foot_offset(self):
+        """보스 중심에서 발까지의 거리 (화면 px)."""
+        return (IDLE_FOOT_Y - IDLE_FRAME_HEIGHT / 2) * self.sprite_scale
+
+    def _track_jump_target(self, player):
+        foot_x, foot_y = player.hitbox_center
+        self.jump_target = self._clamp_to_world(
+            foot_x,
+            foot_y + self._foot_offset(),
+        )
+
+    def _update_jump(self, player, delta_time):
+        self.jump_elapsed += delta_time
+        if self.jump_state == "takeoff":
+            self._track_jump_target(player)
+            frame = int(self.jump_elapsed * JUMP_ANIMATION_FPS)
+            if frame >= JUMP_LIFTOFF_FRAME:
+                self.jump_state = "air"
+                self.jump_elapsed = 0
+                self.jump_origin = (self.x, self.y)
+        elif self.jump_state == "air":
+            if self.jump_elapsed <= JUMP_TRACK_DURATION:
+                self._track_jump_target(player)
+            if self.jump_elapsed + TIME_EPSILON >= JUMP_AIR_DURATION:
+                target_x, target_y = self.jump_target
+                self._face_target(target_x - self.x, target_y - self.y)
+                self._lock_attack_direction()
+                self.x, self.y = self.jump_target
+                self.jump_state = "land"
+                self.jump_elapsed = 0
+                self.jump_hit_applied = False
+        elif self.jump_state == "land":
+            if self.jump_elapsed + TIME_EPSILON >= (
+                LAND_FRAME_COUNT / LAND_ANIMATION_FPS
+            ):
+                self.jump_state = None
+
+    @property
+    def is_airborne(self):
+        """공중에 있어서 맞지도 않고 부딪히지도 않는 상태."""
+        if self.jump_state == "air":
+            return True
+        if self.jump_state == "land":
+            frame = int(self.jump_elapsed * LAND_ANIMATION_FPS)
+            return frame < LAND_IMPACT_FRAME
+        return False
 
     def _world_limits(self):
         """보스 중심(self.x, self.y)이 있을 수 있는 범위. 맵 정보가 없으면 None."""
@@ -500,10 +602,91 @@ class Boss:
     def register_charge_hit(self):
         self.charge_hit_applied = True
 
-    def _foot_position(self):
-        return self.x, self.y - (
-            IDLE_FOOT_Y - IDLE_FRAME_HEIGHT / 2
+    def jump_hits(self, target):
+        """착지 충격 프레임에 그림자 타원 안에 대상의 발이 있으면 맞는다."""
+        if self.jump_state != "land" or self.jump_hit_applied:
+            return False
+        frame = int(self.jump_elapsed * LAND_ANIMATION_FPS)
+        if not LAND_IMPACT_FRAME <= frame <= LAND_IMPACT_FRAME_END:
+            return False
+        foot_x, foot_y = self._foot_position()
+        target_x, target_y = target.hitbox_center
+        scale = self.sprite_scale * LAND_SHADOW_DRAW_SCALE
+        radius_x = LAND_SHADOW_RADIUS_X * scale + target.collision_radius
+        radius_y = LAND_SHADOW_RADIUS_Y * scale + target.collision_radius
+        return (
+            ((target_x - foot_x) / radius_x) ** 2
+            + ((target_y - foot_y) / radius_y) ** 2
+            <= 1
+        )
+
+    def register_jump_hit(self):
+        self.jump_hit_applied = True
+
+    def _draw_land_shadow(self, camera_x, camera_y):
+        """착지 예고 그림자. 도약 준비부터 착지 직전까지 점점 커진다."""
+        if self.jump_state == "takeoff":
+            warning_elapsed = self.jump_elapsed
+        else:
+            warning_elapsed = JUMP_TAKEOFF_DURATION + self.jump_elapsed
+        progress = warning_elapsed / (JUMP_TAKEOFF_DURATION + JUMP_AIR_DURATION)
+        frame = min(
+            int(progress * LAND_SHADOW_FRAME_COUNT),
+            LAND_SHADOW_FRAME_COUNT - 1,
+        )
+        target_x, target_y = self.jump_target
+        shadow_scale = self.sprite_scale * LAND_SHADOW_DRAW_SCALE
+        # 시트의 발 위치(위에서 118px)는 칸 가운데보다 54px 아래
+        # -> 칸 가운데는 착지 발 위치보다 54px 위에 그린다.
+        shadow_center_y = (
+            target_y
+            - self._foot_offset()
+            + (JUMP_FOOT_Y - JUMP_FRAME_HEIGHT / 2) * shadow_scale
+        )
+        self.land_shadow_sprite.clip_draw(
+            frame * JUMP_FRAME_WIDTH,
+            0,
+            JUMP_FRAME_WIDTH,
+            JUMP_FRAME_HEIGHT,
+            target_x - camera_x,
+            shadow_center_y - camera_y,
+            JUMP_FRAME_WIDTH * shadow_scale,
+            JUMP_FRAME_HEIGHT * shadow_scale,
+        )
+
+    def _draw_jump_air(self, camera_x, camera_y):
+        screen_scale = self.sprite_scale
+        self._draw_land_shadow(camera_x, camera_y)
+        # 뛰어오른 자리에 남는 먼지 (점프 시트 9~12프레임)
+        dust_frame = JUMP_LIFTOFF_FRAME + int(
+            self.jump_elapsed * JUMP_ANIMATION_FPS
+        )
+        if dust_frame < JUMP_FRAME_COUNT:
+            origin_x, origin_y = self.jump_origin
+            self.jump_sprite.clip_draw(
+                dust_frame * JUMP_FRAME_WIDTH,
+                self.attack_sprite_direction * JUMP_FRAME_HEIGHT,
+                JUMP_FRAME_WIDTH,
+                JUMP_FRAME_HEIGHT,
+                origin_x - camera_x,
+                origin_y + self._draw_offset_for_foot(
+                    JUMP_FOOT_Y, JUMP_FRAME_HEIGHT
+                ) - camera_y,
+                JUMP_FRAME_WIDTH * screen_scale,
+                JUMP_FRAME_HEIGHT * screen_scale,
+            )
+
+    def _draw_offset_for_foot(self, foot_y_in_frame, frame_height):
+        """발 위치가 다른 시트를 64칸 대기 모션과 발을 맞춰 그릴 때의 y 보정값."""
+        return (
+            foot_y_in_frame
+            - frame_height / 2
+            - IDLE_FOOT_Y
+            + IDLE_FRAME_HEIGHT / 2
         ) * self.sprite_scale
+
+    def _foot_position(self):
+        return self.x, self.y - self._foot_offset()
 
     def _draw_charge_warning(self, camera_x, camera_y):
         screen_scale = self.sprite_scale
@@ -610,6 +793,12 @@ class Boss:
 
     def draw(self, camera_x=0, camera_y=0):
         screen_scale = self.movement_scale * SPRITE_SCALE
+        if self.jump_state == "air":
+            self._draw_jump_air(camera_x, camera_y)
+            return
+        if self.jump_state == "takeoff":
+            self._draw_land_shadow(camera_x, camera_y)
+
         if self.sweep_warning:
             warning_frame = min(
                 int(self.sweep_warning_elapsed * SWEEP_WARNING_ANIMATION_FPS),
@@ -633,7 +822,25 @@ class Boss:
             self._draw_charge_warning(camera_x, camera_y)
 
         foot_y_in_frame = None
-        if self.charging:
+        if self.jump_state == "takeoff":
+            sprite = self.jump_sprite
+            frame_width = JUMP_FRAME_WIDTH
+            frame_height = JUMP_FRAME_HEIGHT
+            foot_y_in_frame = JUMP_FOOT_Y
+            frame = min(
+                int(self.jump_elapsed * JUMP_ANIMATION_FPS),
+                JUMP_FRAME_COUNT - 1,
+            )
+        elif self.jump_state == "land":
+            sprite = self.land_sprite
+            frame_width = JUMP_FRAME_WIDTH
+            frame_height = JUMP_FRAME_HEIGHT
+            foot_y_in_frame = JUMP_FOOT_Y
+            frame = min(
+                int(self.jump_elapsed * LAND_ANIMATION_FPS),
+                LAND_FRAME_COUNT - 1,
+            )
+        elif self.charging:
             sprite = self.charge_sprite
             frame_width = CHARGE_FRAME_WIDTH
             frame_height = CHARGE_FRAME_HEIGHT
@@ -688,12 +895,7 @@ class Boss:
         draw_y = self.y
         if foot_y_in_frame is not None:
             # 128칸 시트는 발 위치가 달라서 64칸 대기 모션과 발을 맞춰 그린다.
-            draw_y += (
-                foot_y_in_frame
-                - frame_height / 2
-                - IDLE_FOOT_Y
-                + IDLE_FRAME_HEIGHT / 2
-            ) * screen_scale
+            draw_y += self._draw_offset_for_foot(foot_y_in_frame, frame_height)
         sprite_direction = (
             self.attack_sprite_direction
             if foot_y_in_frame is not None

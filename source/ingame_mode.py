@@ -4,6 +4,7 @@ import pico2d
 
 from boss import (
     BOSS1_CHARGE_DAMAGE,
+    BOSS1_JUMP_DAMAGE,
     BOSS1_SHIELD_SWEEP_DAMAGE,
     BOSS1_SLAM_DAMAGE,
     Boss,
@@ -117,8 +118,11 @@ class IngameMode(game_framework.Mode):
         if boss is not None:
             if not boss.is_dead:
                 boss.update(player, delta_time)
+            # 공중에 뜬 보스와는 부딪히지 않고,
             # 돌진 중인 보스는 구르기(무적)로 뚫고 지나갈 수 있다.
-            if not (boss.charging and player.is_invulnerable):
+            if not boss.is_airborne and not (
+                boss.charging and player.is_invulnerable
+            ):
                 boss.resolve_player_collision(
                     player,
                     previous_player_x,
@@ -134,7 +138,7 @@ class IngameMode(game_framework.Mode):
 
     def _apply_player_attacks(self, player, boss):
         skill_hit_events = player.consume_skill_hit_events()
-        if boss.is_dead or player.is_dead:
+        if boss.is_dead or player.is_dead or boss.is_airborne:
             return
         if player.attack_hits(boss):
             boss.take_damage(PLAYER_ATTACK_DAMAGE)
@@ -151,6 +155,8 @@ class IngameMode(game_framework.Mode):
             boss.register_slam_hit()
         if boss.charge_hits(player) and player.take_damage(BOSS1_CHARGE_DAMAGE):
             boss.register_charge_hit()
+        if boss.jump_hits(player) and player.take_damage(BOSS1_JUMP_DAMAGE):
+            boss.register_jump_hit()
 
     def draw(self):
         canvas_width = pico2d.get_canvas_width()
