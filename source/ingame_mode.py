@@ -3,6 +3,7 @@ import time
 
 import pico2d
 
+from boss import Boss, DIRECTION_DOWN
 from camera import Camera
 import game_framework
 from map_select_mode import MapSelectMode
@@ -11,6 +12,7 @@ from player import DIRECTION_UP, Player
 
 CAMERA_ZOOM = 1.15
 BOSS1_WALL_BOTTOM_RATIO = 0.20
+BOSS1_BOSS_POSITION_RATIO = 0.72
 
 MAP_IMAGE_PATHS = {
     "test": Path(__file__).resolve().parent.parent
@@ -42,10 +44,17 @@ class IngameMode(game_framework.Mode):
         spawn_y = world_height / 2
         spawn_direction = 0
         north_boundary = None
+        boss = None
         if map_id == "boss1":
             spawn_y = world_height * 0.15
             spawn_direction = DIRECTION_UP
             north_boundary = world_height * (1 - BOSS1_WALL_BOTTOM_RATIO)
+            boss = Boss(
+                world_width / 2,
+                world_height * BOSS1_BOSS_POSITION_RATIO,
+                direction=DIRECTION_DOWN,
+                world_scale=CAMERA_ZOOM,
+            )
 
         self.player = Player(
             world_width,
@@ -66,6 +75,7 @@ class IngameMode(game_framework.Mode):
         self.last_camera_update = time.perf_counter()
         self.current_map_id = map_id
         self.background = background
+        self.boss = boss
 
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_ESCAPE:
@@ -79,7 +89,16 @@ class IngameMode(game_framework.Mode):
         self.player.clear_input()
 
     def update(self):
+        previous_player_x = self.player.x
+        previous_player_y = self.player.y
         self.player.update()
+        if self.boss is not None:
+            self.boss.resolve_player_collision(
+                self.player,
+                previous_player_x,
+                previous_player_y,
+            )
+            self.boss.update()
         now = time.perf_counter()
         delta_time = min(now - self.last_camera_update, 0.1)
         self.last_camera_update = now
@@ -94,4 +113,6 @@ class IngameMode(game_framework.Mode):
             self.background.w * self.background_scale,
             self.background.h * self.background_scale,
         )
+        if self.boss is not None:
+            self.boss.draw(self.camera.x, self.camera.y)
         self.player.draw(self.camera.x, self.camera.y)

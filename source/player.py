@@ -24,6 +24,7 @@ ATTACK_DURATION = ATTACK_FRAME_COUNT / ATTACK_ANIMATION_FPS
 BASE_SCREEN_HEIGHT = 600
 DIRECTION_UP = 3
 WALL_COLLISION_CLEARANCE = 32
+PLAYER_COLLISION_RADIUS = 24
 
 SPRITE_DIRECTORY = Path(__file__).resolve().parent.parent / "sprites" / "player"
 
@@ -133,6 +134,13 @@ class Player:
     @property
     def is_invulnerable(self):
         return self.rolling
+
+    @property
+    def collision_radius(self):
+        screen_scale = (
+            pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT * self.world_scale
+        )
+        return PLAYER_COLLISION_RADIUS * screen_scale
 
     def _start_roll(self):
         if self.rolling or self.attacking:
