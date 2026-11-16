@@ -1,8 +1,8 @@
 import math
 from pathlib import Path
-import time
-
 import pico2d
+
+import direction as dirs
 
 
 FRAME_WIDTH = 128
@@ -26,6 +26,7 @@ ATTACK_MOVE_SPEED_MULTIPLIER = 0.7
 ROLL_DURATION = ROLL_FRAME_COUNT / ROLL_ANIMATION_FPS
 ROLL_SPEED_MULTIPLIER = 2
 ATTACK_DURATION = ATTACK_FRAME_COUNT / ATTACK_ANIMATION_FPS
+PLAYER_MAX_HP = 100
 PLAYER_ATTACK_DAMAGE = 10
 PLAYER_SKILL_DAMAGE_PER_HIT = int(PLAYER_ATTACK_DAMAGE * 0.6)
 PLAYER_ATTACK_ACTIVE_FRAME_START = 4
@@ -33,7 +34,6 @@ PLAYER_ATTACK_ACTIVE_FRAME_END = 6
 PLAYER_ATTACK_EXTRA_RANGE = 64
 PLAYER_SKILL_EXTRA_RANGE = 64
 BASE_SCREEN_HEIGHT = 600
-DIRECTION_UP = 3
 WALL_COLLISION_CLEARANCE = 32
 PLAYER_COLLISION_RADIUS = 24
 PLAYER_HITBOX_FOOT_OFFSET = 44
@@ -45,18 +45,12 @@ _ROLL_KEY = pico2d.SDLK_SPACE
 _ATTACK_KEY = pico2d.SDLK_z
 _SKILL_KEY = pico2d.SDLK_x
 _DIRECTION_KEYS = {
-    pico2d.SDLK_DOWN: (0, -1, 0),
-    pico2d.SDLK_RIGHT: (1, 0, 1),
-    pico2d.SDLK_LEFT: (-1, 0, 2),
-    pico2d.SDLK_UP: (0, 1, DIRECTION_UP),
+    pico2d.SDLK_DOWN: (0, -1, dirs.DOWN),
+    pico2d.SDLK_RIGHT: (1, 0, dirs.RIGHT),
+    pico2d.SDLK_LEFT: (-1, 0, dirs.LEFT),
+    pico2d.SDLK_UP: (0, 1, dirs.UP),
 }
 _SPRITE_ROW_BY_DIRECTION = (0, 2, 1, 3)
-_DIRECTION_VECTOR_BY_DIRECTION = (
-    (0, -1),
-    (1, 0),
-    (-1, 0),
-    (0, 1),
-)
 
 
 class Player:
@@ -66,7 +60,7 @@ class Player:
         world_height=None,
         spawn_x=None,
         spawn_y=None,
-        direction=0,
+        direction=dirs.DOWN,
         world_scale=1.0,
         north_boundary=None,
     ):
@@ -103,6 +97,8 @@ class Player:
         self.x = self.world_width / 2 if spawn_x is None else spawn_x
         self.y = self.world_height / 2 if spawn_y is None else spawn_y
         self.direction = direction
+        self.max_hp = PLAYER_MAX_HP
+        self.hp = PLAYER_MAX_HP
         self.pressed_keys = []
         self.roll_key_held = False
         self.attack_key_held = False
@@ -110,7 +106,6 @@ class Player:
         self.run_pressed = False
         self.equipped_skill = "combo_slash"
         self.animation_time = 0
-        self.last_update = time.perf_counter()
         self.moving = False
         self.rolling = False
         self.roll_elapsed = 0
@@ -165,6 +160,17 @@ class Player:
         return self.rolling
 
     @property
+    def is_dead(self):
+        return self.hp <= 0
+
+    def take_damage(self, amount):
+        """피해를 입으면 True. 무적(구르기)이거나 이미 죽었으면 False."""
+        if self.is_invulnerable or self.is_dead:
+            return False
+        self.hp = max(0, self.hp - amount)
+        return True
+
+    @property
     def collision_radius(self):
         screen_scale = (
             pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT * self.world_scale
@@ -196,7 +202,7 @@ class Player:
         return self._hits_in_front(target, PLAYER_ATTACK_EXTRA_RANGE)
 
     def _hits_in_front(self, target, extra_range):
-        direction_x, direction_y = _DIRECTION_VECTOR_BY_DIRECTION[self.direction]
+        direction_x, direction_y = dirs.VECTORS[self.direction]
         dx = target.x - self.x
         dy = target.y - self.y
         distance = math.hypot(dx, dy)
@@ -250,7 +256,7 @@ class Player:
                 self.direction = direction
 
         if dx == 0 and dy == 0:
-            dx, dy = _DIRECTION_VECTOR_BY_DIRECTION[self.direction]
+            dx, dy = dirs.VECTORS[self.direction]
 
         distance = math.hypot(dx, dy)
         self.roll_dx = dx / distance
@@ -289,10 +295,7 @@ class Player:
         self.skill_elapsed = 0
         self.skill_hit_count = 0
 
-    def update(self):
-        now = time.perf_counter()
-        delta_time = min(now - self.last_update, 0.1)
-        self.last_update = now
+    def update(self, delta_time):
         screen_scale = (
             pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT * self.world_scale
         )

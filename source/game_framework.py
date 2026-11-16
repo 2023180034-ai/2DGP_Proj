@@ -1,3 +1,5 @@
+import time
+
 import pico2d
 import pico2d.pico2d as pico2d_core
 
@@ -5,6 +7,7 @@ import pico2d.pico2d as pico2d_core
 SCREEN_WIDTH = 1980
 SCREEN_HEIGHT = 1080
 FRAME_RATE = 60
+MAX_DELTA_TIME = 0.1
 
 _mode_stack = []
 _running = False
@@ -26,7 +29,7 @@ class Mode:
     def handle_event(self, event):
         pass
 
-    def update(self):
+    def update(self, delta_time):
         pass
 
     def draw(self):
@@ -87,6 +90,7 @@ def run(start_mode):
 
         start_mode.enter()
         _mode_stack.append(start_mode)
+        last_frame_time = time.perf_counter()
 
         while _running and _mode_stack:
             for event in pico2d.get_events():
@@ -99,7 +103,11 @@ def run(start_mode):
             if not _running or not _mode_stack:
                 break
 
-            _mode_stack[-1].update()
+            now = time.perf_counter()
+            delta_time = min(now - last_frame_time, MAX_DELTA_TIME)
+            last_frame_time = now
+
+            _mode_stack[-1].update(delta_time)
             pico2d.clear_canvas()
             _mode_stack[-1].draw()
             pico2d.update_canvas()

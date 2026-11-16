@@ -68,7 +68,7 @@ class MapSelectMode(game_framework.Mode):
                 return map_id
         return None
 
-    def update(self):
+    def update(self, delta_time):
         pass
 
     def draw(self):

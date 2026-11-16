@@ -8,8 +8,6 @@ SCALE = 3
 FONT_PATH = r"C:\Windows\Fonts\malgun.ttf"
 BOSS_POS = (990, 1000)
 PLAYER_POS = (215, 38)
-PLAYER_MAX_HP = 100
-BOSS1_MAX_HP = 10_000
 
 CHIP_DELAY = 0.6
 CHIP_SPEED = 0.35
@@ -33,8 +31,9 @@ class _ChipBar:
     SHAKE_PIXELS = 2
     _images = {}
 
-    def __init__(self, max_hp, x, y):
-        if max_hp <= 0:
+    def __init__(self, target, x, y):
+        """target: hp, max_hp 속성을 가진 객체(Player, Boss). 바는 표시만 한다."""
+        if target.max_hp <= 0:
             raise ValueError("max_hp must be greater than zero")
 
         if self.PREFIX not in self._images:
@@ -46,33 +45,29 @@ class _ChipBar:
             }
         self.images = self._images[self.PREFIX]
         self.font = pico2d.load_font(FONT_PATH, 22) if FONT_PATH else None
+        self.target = target
         self.x = x
         self.y = y
-        self.max_hp = max_hp
-        self.hp = max_hp
-        self.chip_hp = max_hp
+        self.hp = target.hp
+        self.chip_hp = target.hp
         self.delay = 0
         self.flash_time = 0
         self.shake_time = 0
 
-    def damage(self, amount):
-        self.hp = max(0, self.hp - amount)
-        self.delay = CHIP_DELAY
-        self.flash_time = FLASH_TIME
-        self.shake_time = SHAKE_TIME
-
-    def heal(self, amount):
-        self.hp = min(self.max_hp, self.hp + amount)
-        self.chip_hp = max(self.chip_hp, self.hp)
-
-    def set_hp(self, hp):
-        self.hp = self.chip_hp = max(0, min(self.max_hp, hp))
-
-    def is_dead(self):
-        return self.hp <= 0
+    @property
+    def max_hp(self):
+        return self.target.max_hp
 
     def update(self, delta_time):
         delta_time = max(0, delta_time)
+        target_hp = max(0, min(self.max_hp, self.target.hp))
+        if target_hp < self.hp:
+            self.delay = CHIP_DELAY
+            self.flash_time = FLASH_TIME
+            self.shake_time = SHAKE_TIME
+        self.hp = target_hp
+        self.chip_hp = min(max(self.chip_hp, self.hp), self.max_hp)
+
         self.flash_time = max(0, self.flash_time - delta_time)
         self.shake_time = max(0, self.shake_time - delta_time)
         if self.chip_hp > self.hp:
@@ -83,8 +78,6 @@ class _ChipBar:
                     self.hp,
                     self.chip_hp - self.max_hp * CHIP_SPEED * delta_time,
                 )
-        else:
-            self.chip_hp = self.hp
 
     def _draw_fill(self, image, ratio, left, bottom):
         width = int(self.BAR_WIDTH * ratio)
@@ -145,9 +138,9 @@ class BossHpBar(_ChipBar):
     BAR_OFFSET_X, BAR_OFFSET_Y = 5, 3
     SHAKE_PIXELS = 3
 
-    def __init__(self, max_hp, name=None, x=None, y=None):
+    def __init__(self, target, name=None, x=None, y=None):
         super().__init__(
-            max_hp,
+            target,
             BOSS_POS[0] if x is None else x,
             BOSS_POS[1] if y is None else y,
         )
@@ -174,22 +167,12 @@ class PlayerHpBar(_ChipBar):
     BAR_WIDTH, BAR_HEIGHT = 110, 6
     BAR_OFFSET_X, BAR_OFFSET_Y = 17, 3
 
-    def __init__(self, max_hp, x=None, y=None):
+    def __init__(self, target, x=None, y=None):
         super().__init__(
-            max_hp,
+            target,
             PLAYER_POS[0] if x is None else x,
             PLAYER_POS[1] if y is None else y,
         )
-
-    def set_max_hp(self, max_hp, refill=True):
-        if max_hp <= 0:
-            raise ValueError("max_hp must be greater than zero")
-        self.max_hp = max_hp
-        if refill:
-            self.set_hp(max_hp)
-        else:
-            self.hp = min(self.hp, max_hp)
-            self.chip_hp = min(self.chip_hp, max_hp)
 
     def draw(self):
         _, bottom, right, top = self._draw_bar()

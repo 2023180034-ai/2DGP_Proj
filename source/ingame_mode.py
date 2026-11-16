@@ -1,5 +1,4 @@
 from pathlib import Path
-import time
 
 import pico2d
 
@@ -7,14 +6,13 @@ from boss import (
     BOSS1_SHIELD_SWEEP_DAMAGE,
     BOSS1_SLAM_DAMAGE,
     Boss,
-    DIRECTION_DOWN,
 )
 from camera import Camera
+import direction as dirs
 import game_framework
-from hp_bar import BOSS1_MAX_HP, PLAYER_MAX_HP, BossHpBar, PlayerHpBar
+from hp_bar import BossHpBar, PlayerHpBar
 from map_select_mode import MapSelectMode
 from player import (
-    DIRECTION_UP,
     PLAYER_ATTACK_DAMAGE,
     PLAYER_SKILL_DAMAGE_PER_HIT,
     Player,
@@ -53,17 +51,17 @@ class IngameMode(game_framework.Mode):
         world_height = background.h * self.background_scale
         spawn_x = world_width / 2
         spawn_y = world_height / 2
-        spawn_direction = 0
+        spawn_direction = dirs.DOWN
         north_boundary = None
         boss = None
         if map_id == "boss1":
             spawn_y = world_height * 0.15
-            spawn_direction = DIRECTION_UP
+            spawn_direction = dirs.UP
             north_boundary = world_height * (1 - BOSS1_WALL_BOTTOM_RATIO)
             boss = Boss(
                 world_width / 2,
                 world_height * BOSS1_BOSS_POSITION_RATIO,
-                direction=DIRECTION_DOWN,
+                direction=dirs.DOWN,
                 world_scale=CAMERA_ZOOM,
             )
 
@@ -83,13 +81,12 @@ class IngameMode(game_framework.Mode):
             canvas_height,
         )
         self.camera.reset(self.player.x, self.player.y)
-        self.last_camera_update = time.perf_counter()
         self.current_map_id = map_id
         self.background = background
         self.boss = boss
-        self.player_hp_bar = PlayerHpBar(PLAYER_MAX_HP)
+        self.player_hp_bar = PlayerHpBar(self.player)
         self.boss_hp_bar = (
-            BossHpBar(BOSS1_MAX_HP, name="보스 1")
+            BossHpBar(boss, name="보스 1")
             if boss is not None
             else None
         )
@@ -99,53 +96,53 @@ class IngameMode(game_framework.Mode):
             game_framework.quit()
         elif event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_m:
             game_framework.push_mode(MapSelectMode(self))
-        else:
+        elif not self.player.is_dead:
             self.player.handle_event(event)
 
     def pause(self):
         self.player.clear_input()
 
-    def update(self):
-        now = time.perf_counter()
-        delta_time = min(now - self.last_camera_update, 0.1)
-        self.last_camera_update = now
-        previous_player_x = self.player.x
-        previous_player_y = self.player.y
-        self.player.update()
-        self.player_hp_bar.update(delta_time)
-        if self.boss is not None:
-            self.boss.update(self.player)
-            self.boss.resolve_player_collision(
-                self.player,
+    def update(self, delta_time):
+        player = self.player
+        boss = self.boss
+        previous_player_x = player.x
+        previous_player_y = player.y
+        if not player.is_dead:
+            player.update(delta_time)
+
+        if boss is not None:
+            if not boss.is_dead:
+                boss.update(player, delta_time)
+            boss.resolve_player_collision(
+                player,
                 previous_player_x,
                 previous_player_y,
             )
-            if (
-                not self.boss_hp_bar.is_dead()
-                and self.player.attack_hits(self.boss)
-            ):
-                self.boss_hp_bar.damage(PLAYER_ATTACK_DAMAGE)
-                self.player.register_attack_hit()
-            skill_hit_events = self.player.consume_skill_hit_events()
-            if not self.boss_hp_bar.is_dead() and self.player.skill_hits(
-                self.boss
-            ):
-                for _ in range(skill_hit_events):
-                    self.boss_hp_bar.damage(PLAYER_SKILL_DAMAGE_PER_HIT)
-            if (
-                self.boss.shield_sweep_hits(self.player)
-                and not self.player.is_invulnerable
-            ):
-                self.player_hp_bar.damage(BOSS1_SHIELD_SWEEP_DAMAGE)
-                self.boss.register_shield_sweep_hit()
-            if (
-                self.boss.slam_hits(self.player)
-                and not self.player.is_invulnerable
-            ):
-                self.player_hp_bar.damage(BOSS1_SLAM_DAMAGE)
-                self.boss.register_slam_hit()
+            self._apply_player_attacks(player, boss)
+            if not boss.is_dead:
+                self._apply_boss_attacks(boss, player)
             self.boss_hp_bar.update(delta_time)
-        self.camera.follow(self.player.x, self.player.y, delta_time)
+
+        self.player_hp_bar.update(delta_time)
+        self.camera.follow(player.x, player.y, delta_time)
+
+    def _apply_player_attacks(self, player, boss):
+        skill_hit_events = player.consume_skill_hit_events()
+        if boss.is_dead or player.is_dead:
+            return
+        if player.attack_hits(boss):
+            boss.take_damage(PLAYER_ATTACK_DAMAGE)
+            player.register_attack_hit()
+        if skill_hit_events and player.skill_hits(boss):
+            boss.take_damage(PLAYER_SKILL_DAMAGE_PER_HIT * skill_hit_events)
+
+    def _apply_boss_attacks(self, boss, player):
+        if boss.shield_sweep_hits(player) and player.take_damage(
+            BOSS1_SHIELD_SWEEP_DAMAGE
+        ):
+            boss.register_shield_sweep_hit()
+        if boss.slam_hits(player) and player.take_damage(BOSS1_SLAM_DAMAGE):
+            boss.register_slam_hit()
 
     def draw(self):
         canvas_width = pico2d.get_canvas_width()

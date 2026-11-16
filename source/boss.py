@@ -1,8 +1,8 @@
 import math
 from pathlib import Path
-import time
-
 import pico2d
+
+import direction as dirs
 
 
 IDLE_FRAME_WIDTH = 64
@@ -19,6 +19,9 @@ SWEEP_WARNING_ANIMATION_FPS = 8
 SWEEP_WARNING_DURATION = (
     SWEEP_WARNING_FRAME_COUNT / SWEEP_WARNING_ANIMATION_FPS
 )
+# 예고 이펙트는 반지름 34px 반원 고리, 칸 가운데 = 보스 발보다 8px 위
+SWEEP_WARNING_CENTER_ABOVE_FOOT = 8
+SWEEP_WARNING_OUTER_RADIUS = 34
 SHIELD_SWEEP_FRAME_WIDTH = 128
 SHIELD_SWEEP_FRAME_HEIGHT = 128
 SHIELD_SWEEP_FOOT_Y = 118
@@ -28,7 +31,6 @@ SHIELD_SWEEP_COOLDOWN = 7.0
 SHIELD_SWEEP_ACTIVE_FRAME_START = 4
 SHIELD_SWEEP_ACTIVE_FRAME_END = 6
 BOSS1_SHIELD_SWEEP_DAMAGE = 50
-BOSS1_SHIELD_SWEEP_EXTRA_REACH = 48
 SLAM_WARNING_FRAME_WIDTH = 128
 SLAM_WARNING_FRAME_HEIGHT = 128
 SLAM_WARNING_FRAME_COUNT = 8
@@ -54,6 +56,7 @@ SLAM_ERUPTION_DRAW_SCALE = 1.25
 SLAM_COOLDOWN = 9.0
 SLAM_MAX_RANGE = 256
 BOSS1_SLAM_DAMAGE = 90
+BOSS1_MAX_HP = 10_000
 BOSS_STANDOFF_DISTANCE = 16
 TIME_EPSILON = 1e-9
 CHASE_DELAY = 3.0
@@ -64,20 +67,17 @@ BOSS_COLLISION_RADIUS = 12
 
 SPRITE_DIRECTORY = Path(__file__).resolve().parent.parent / "sprites" / "boss1"
 
-DIRECTION_DOWN = 0
-DIRECTION_LEFT = 1
-DIRECTION_RIGHT = 2
-DIRECTION_UP = 3
-_DIRECTION_VECTOR_BY_DIRECTION = (
-    (0, -1),
-    (-1, 0),
-    (1, 0),
-    (0, 1),
-)
 
 
 class Boss:
-    def __init__(self, x, y, direction=DIRECTION_DOWN, world_scale=1.0):
+    def __init__(
+        self,
+        x,
+        y,
+        direction=dirs.DOWN,
+        world_scale=1.0,
+        max_hp=BOSS1_MAX_HP,
+    ):
         self.idle_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "boss1_idle.png")
         )
@@ -102,7 +102,9 @@ class Boss:
         self.x = x
         self.y = y
         self.direction = direction
-        self.aim_direction = _DIRECTION_VECTOR_BY_DIRECTION[direction]
+        self.max_hp = max_hp
+        self.hp = max_hp
+        self.aim_direction = dirs.VECTORS[direction]
         self.attack_direction = self.aim_direction
         self.attack_sprite_direction = direction
         self.world_scale = world_scale
@@ -125,12 +127,8 @@ class Boss:
         self.slam_eruption = False
         self.slam_eruption_elapsed = 0
         self.slam_cooldown = 0
-        self.last_update = time.perf_counter()
 
-    def update(self, player):
-        now = time.perf_counter()
-        delta_time = min(now - self.last_update, 0.1)
-        self.last_update = now
+    def update(self, player, delta_time):
         self.elapsed_time += delta_time
         self.animation_time += delta_time
         self.shield_sweep_cooldown = max(
@@ -250,17 +248,27 @@ class Boss:
 
         self.aim_direction = (dx / distance, dy / distance)
         if abs(dx) > abs(dy):
-            self.direction = DIRECTION_RIGHT if dx > 0 else DIRECTION_LEFT
+            self.direction = dirs.RIGHT if dx > 0 else dirs.LEFT
         else:
-            self.direction = DIRECTION_UP if dy > 0 else DIRECTION_DOWN
+            self.direction = dirs.UP if dy > 0 else dirs.DOWN
 
     def _attack_rotation(self):
         aim_x, aim_y = self.attack_direction
-        sprite_x, sprite_y = _DIRECTION_VECTOR_BY_DIRECTION[
+        sprite_x, sprite_y = dirs.VECTORS[
             self.attack_sprite_direction
         ]
         rotation = math.atan2(aim_y, aim_x) - math.atan2(sprite_y, sprite_x)
         return (rotation + math.pi) % (2 * math.pi) - math.pi
+
+    @property
+    def is_dead(self):
+        return self.hp <= 0
+
+    def take_damage(self, amount):
+        if self.is_dead:
+            return False
+        self.hp = max(0, self.hp - amount)
+        return True
 
     @property
     def movement_scale(self):
@@ -285,16 +293,35 @@ class Boss:
             <= SHIELD_SWEEP_ACTIVE_FRAME_END
         )
 
+    def _sweep_center(self):
+        """휘두르기 예고 반원의 중심 (보스 발보다 조금 위)."""
+        screen_scale = self.movement_scale * SPRITE_SCALE
+        return self.x, self.y + (
+            IDLE_FRAME_HEIGHT / 2
+            - IDLE_FOOT_Y
+            + SWEEP_WARNING_CENTER_ABOVE_FOOT
+        ) * screen_scale
+
     def shield_sweep_hits(self, target):
+        """예고로 보여준 반원 범위 안에 대상의 발이 닿으면 맞는다."""
         if not self.shield_sweep_hit_active:
             return False
 
-        max_distance = (
-            self.collision_radius
-            + target.collision_radius
-            + BOSS1_SHIELD_SWEEP_EXTRA_REACH * self.movement_scale
+        center_x, center_y = self._sweep_center()
+        target_x, target_y = target.hitbox_center
+        dx = target_x - center_x
+        dy = target_y - center_y
+        direction_x, direction_y = self.attack_direction
+        target_radius = target.collision_radius
+        reach = (
+            SWEEP_WARNING_OUTER_RADIUS
+            * self.movement_scale
+            * SPRITE_SCALE
         )
-        return self._target_in_front(target, max_distance)
+        return (
+            math.hypot(dx, dy) <= reach + target_radius
+            and dx * direction_x + dy * direction_y >= -target_radius
+        )
 
     def register_shield_sweep_hit(self):
         self.shield_sweep_hit_applied = True
@@ -343,17 +370,6 @@ class Boss:
             * progress
         )
         return lateral <= half_width + target_radius
-
-    def _target_in_front(self, target, max_distance):
-        direction_x, direction_y = self.attack_direction
-        target_x, target_y = target.hitbox_center
-        dx = target_x - self.x
-        dy = target_y - self.y
-        distance = (dx * dx + dy * dy) ** 0.5
-        return (
-            0 < distance <= max_distance
-            and dx * direction_x + dy * direction_y >= distance * 0.5
-        )
 
     def _slam_effect_position(self, draw_scale=1.0):
         direction_x, direction_y = self.attack_direction
@@ -410,11 +426,7 @@ class Boss:
                 int(self.sweep_warning_elapsed * SWEEP_WARNING_ANIMATION_FPS),
                 SWEEP_WARNING_FRAME_COUNT - 1,
             )
-            warning_y = self.y + (
-                IDLE_FRAME_HEIGHT / 2
-                - IDLE_FOOT_Y
-                + 8
-            ) * screen_scale
+            _, warning_y = self._sweep_center()
             self.sweep_warning_sprite.clip_composite_draw(
                 warning_frame * SWEEP_WARNING_FRAME_WIDTH,
                 self.attack_sprite_direction * SWEEP_WARNING_FRAME_HEIGHT,
