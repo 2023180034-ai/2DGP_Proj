@@ -16,7 +16,8 @@ from game_over import GameOverUI
 from gold_display import GoldDisplay
 from hp_bar import BossHpBar, PlayerHpBar
 from map_select_mode import MapSelectMode
-from player import Player
+from player import SKILL_COOLDOWN, Player
+from skill_hud import SkillHud
 from status_window import StatusWindow
 from upgrade_window import UpgradeWindow
 from window_modes import StatusMode, UpgradeMode
@@ -48,6 +49,7 @@ class IngameMode(game_framework.Mode):
         self.status_window = StatusWindow()
         self.upgrade_window = UpgradeWindow()
         self.game_over = GameOverUI()
+        self.skill_hud = SkillHud("slash", cooldown=SKILL_COOLDOWN, key_label="X")
         self.reset_map("test")
 
     def reset_map(self, map_id):
@@ -109,6 +111,7 @@ class IngameMode(game_framework.Mode):
         self.run_damage = 0
         self.run_settled = False
         self.game_over.stop()
+        self.skill_hud.reset()
 
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_ESCAPE:
@@ -121,6 +124,8 @@ class IngameMode(game_framework.Mode):
             game_framework.push_mode(MapSelectMode(self))
         elif not self.player.is_dead:
             self.player.handle_event(event)
+            if self.player.consume_skill_denied():
+                self.skill_hud.deny()
 
     def _handle_game_over_event(self, event):
         """사망 화면 버튼. 사망 중에는 플레이어 조작과 맵 선택(M)을 막는다."""
@@ -176,6 +181,7 @@ class IngameMode(game_framework.Mode):
                 self.game_over.start()
 
         self.player_hp_bar.update(delta_time)
+        self.skill_hud.update(player.skill_cooldown)
         self.gold_ui.update()
         self.camera.follow(player.x, player.y, delta_time)
 
@@ -229,6 +235,7 @@ class IngameMode(game_framework.Mode):
         if self.boss is not None:
             self.boss.draw_slam_effects(self.camera.x, self.camera.y)
         self.player_hp_bar.draw()
+        self.skill_hud.draw()
         if self.boss_hp_bar is not None:
             self.boss_hp_bar.draw()
         self.game_over.draw()

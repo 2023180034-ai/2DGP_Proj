@@ -17,6 +17,7 @@ SKILL_FRAME_HEIGHT = 128
 SKILL_FRAME_COUNT = 18
 SKILL_ANIMATION_FPS = 15
 SKILL_HIT_FRAMES = (3, 6, 9, 12, 15)
+SKILL_COOLDOWN = 8.0  # 스킬(X) 쿨타임, 임시 값
 ANIMATION_FPS = 8
 RUN_ANIMATION_FPS = 12
 ROLL_ANIMATION_FPS = 20
@@ -118,6 +119,8 @@ class Player:
         self.skill_attacking = False
         self.skill_elapsed = 0
         self.skill_hit_count = 0
+        self.skill_cooldown = 0.0  # 남은 스킬 쿨타임 (초)
+        self.skill_denied = False  # 쿨타임 중에 스킬 키를 눌렀는지 (UI 흔들기용)
 
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == _ROLL_KEY:
@@ -301,6 +304,9 @@ class Player:
         self.attack_hit_applied = False
 
     def _start_skill(self):
+        if self.equipped_skill is not None and self.skill_cooldown > 0:
+            self.skill_denied = True
+            return
         if (
             self.equipped_skill is None
             or self.rolling
@@ -317,8 +323,15 @@ class Player:
         self.skill_attacking = True
         self.skill_elapsed = 0
         self.skill_hit_count = 0
+        self.skill_cooldown = SKILL_COOLDOWN
+
+    def consume_skill_denied(self):
+        denied = self.skill_denied
+        self.skill_denied = False
+        return denied
 
     def update(self, delta_time):
+        self.skill_cooldown = max(0.0, self.skill_cooldown - delta_time)
         screen_scale = (
             pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT * self.world_scale
         )
