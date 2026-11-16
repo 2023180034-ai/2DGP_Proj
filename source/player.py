@@ -50,7 +50,6 @@ _DIRECTION_KEYS = {
     pico2d.SDLK_LEFT: (-1, 0, dirs.LEFT),
     pico2d.SDLK_UP: (0, 1, dirs.UP),
 }
-_SPRITE_ROW_BY_DIRECTION = (0, 2, 1, 3)
 
 
 class Player:
@@ -403,7 +402,8 @@ class Player:
             frame_width = FRAME_WIDTH
             frame_height = FRAME_HEIGHT
         left = frame * frame_width
-        bottom = _SPRITE_ROW_BY_DIRECTION[self.direction] * frame_height
+        # 방향 값이 곧 스프라이트 시트 행 번호 (direction.py 참고)
+        bottom = self.direction * frame_height
         sprite.clip_draw(
             left,
             bottom,
