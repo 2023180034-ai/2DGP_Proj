@@ -6,6 +6,7 @@ import pico2d
 from boss import Boss, DIRECTION_DOWN
 from camera import Camera
 import game_framework
+from hp_bar import BOSS1_MAX_HP, PLAYER_MAX_HP, BossHpBar, PlayerHpBar
 from map_select_mode import MapSelectMode
 from player import DIRECTION_UP, Player
 
@@ -76,6 +77,12 @@ class IngameMode(game_framework.Mode):
         self.current_map_id = map_id
         self.background = background
         self.boss = boss
+        self.player_hp_bar = PlayerHpBar(PLAYER_MAX_HP)
+        self.boss_hp_bar = (
+            BossHpBar(BOSS1_MAX_HP, name="보스 1")
+            if boss is not None
+            else None
+        )
 
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_ESCAPE:
@@ -89,9 +96,13 @@ class IngameMode(game_framework.Mode):
         self.player.clear_input()
 
     def update(self):
+        now = time.perf_counter()
+        delta_time = min(now - self.last_camera_update, 0.1)
+        self.last_camera_update = now
         previous_player_x = self.player.x
         previous_player_y = self.player.y
         self.player.update()
+        self.player_hp_bar.update(delta_time)
         if self.boss is not None:
             self.boss.update(self.player)
             self.boss.resolve_player_collision(
@@ -99,9 +110,7 @@ class IngameMode(game_framework.Mode):
                 previous_player_x,
                 previous_player_y,
             )
-        now = time.perf_counter()
-        delta_time = min(now - self.last_camera_update, 0.1)
-        self.last_camera_update = now
+            self.boss_hp_bar.update(delta_time)
         self.camera.follow(self.player.x, self.player.y, delta_time)
 
     def draw(self):
@@ -116,3 +125,6 @@ class IngameMode(game_framework.Mode):
         if self.boss is not None:
             self.boss.draw(self.camera.x, self.camera.y)
         self.player.draw(self.camera.x, self.camera.y)
+        self.player_hp_bar.draw()
+        if self.boss_hp_bar is not None:
+            self.boss_hp_bar.draw()
