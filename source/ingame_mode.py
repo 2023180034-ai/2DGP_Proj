@@ -3,6 +3,7 @@ from pathlib import Path
 import pico2d
 
 from boss import (
+    BOSS1_CHARGE_DAMAGE,
     BOSS1_SHIELD_SWEEP_DAMAGE,
     BOSS1_SLAM_DAMAGE,
     Boss,
@@ -63,6 +64,9 @@ class IngameMode(game_framework.Mode):
                 world_height * BOSS1_BOSS_POSITION_RATIO,
                 direction=dirs.DOWN,
                 world_scale=CAMERA_ZOOM,
+                world_width=world_width,
+                world_height=world_height,
+                north_boundary=north_boundary,
             )
 
         self.player = Player(
@@ -113,11 +117,13 @@ class IngameMode(game_framework.Mode):
         if boss is not None:
             if not boss.is_dead:
                 boss.update(player, delta_time)
-            boss.resolve_player_collision(
-                player,
-                previous_player_x,
-                previous_player_y,
-            )
+            # 돌진 중인 보스는 구르기(무적)로 뚫고 지나갈 수 있다.
+            if not (boss.charging and player.is_invulnerable):
+                boss.resolve_player_collision(
+                    player,
+                    previous_player_x,
+                    previous_player_y,
+                )
             self._apply_player_attacks(player, boss)
             if not boss.is_dead:
                 self._apply_boss_attacks(boss, player)
@@ -143,6 +149,8 @@ class IngameMode(game_framework.Mode):
             boss.register_shield_sweep_hit()
         if boss.slam_hits(player) and player.take_damage(BOSS1_SLAM_DAMAGE):
             boss.register_slam_hit()
+        if boss.charge_hits(player) and player.take_damage(BOSS1_CHARGE_DAMAGE):
+            boss.register_charge_hit()
 
     def draw(self):
         canvas_width = pico2d.get_canvas_width()

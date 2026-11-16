@@ -1,5 +1,7 @@
 import math
 from pathlib import Path
+import random
+
 import pico2d
 
 import direction as dirs
@@ -31,6 +33,7 @@ SHIELD_SWEEP_COOLDOWN = 7.0
 SHIELD_SWEEP_ACTIVE_FRAME_START = 4
 SHIELD_SWEEP_ACTIVE_FRAME_END = 6
 BOSS1_SHIELD_SWEEP_DAMAGE = 50
+BOSS_COLLISION_RADIUS = 12
 SLAM_WARNING_FRAME_WIDTH = 128
 SLAM_WARNING_FRAME_HEIGHT = 128
 SLAM_WARNING_FRAME_COUNT = 8
@@ -56,6 +59,28 @@ SLAM_ERUPTION_DRAW_SCALE = 1.25
 SLAM_COOLDOWN = 9.0
 SLAM_MAX_RANGE = 256
 BOSS1_SLAM_DAMAGE = 90
+CHARGE_FRAME_WIDTH = 128
+CHARGE_FRAME_HEIGHT = 128
+CHARGE_FOOT_Y = 118
+CHARGE_READY_FRAME_COUNT = 4
+CHARGE_READY_ANIMATION_FPS = 8
+CHARGE_FRAME_COUNT = 6
+CHARGE_ANIMATION_FPS = 12
+CHARGE_WARNING_FRAME_WIDTH = 200
+CHARGE_WARNING_FRAME_HEIGHT = 48
+CHARGE_WARNING_FRAME_COUNT = 8
+CHARGE_WARNING_ANIMATION_FPS = 8
+CHARGE_WARNING_DURATION = (
+    CHARGE_WARNING_FRAME_COUNT / CHARGE_WARNING_ANIMATION_FPS
+)
+# 예고 화살표: 꼬리 x=2, 끝 x=198 (길이 196px). 꼬리를 보스 발에 두고
+# 보스 몸 앞쪽이 화살표 끝에 닿을 때까지 돌진한다.
+CHARGE_WARNING_ARROW_LENGTH = 196
+CHARGE_DISTANCE = CHARGE_WARNING_ARROW_LENGTH - BOSS_COLLISION_RADIUS
+CHARGE_SPEED = 300
+CHARGE_HIT_MARGIN = 4
+CHARGE_COOLDOWN = 12.0
+BOSS1_CHARGE_DAMAGE = 150
 BOSS1_MAX_HP = 10_000
 BOSS_STANDOFF_DISTANCE = 16
 TIME_EPSILON = 1e-9
@@ -63,7 +88,6 @@ CHASE_DELAY = 3.0
 BOSS_MOVE_SPEED = 80
 BASE_SCREEN_HEIGHT = 600
 SPRITE_SCALE = 3
-BOSS_COLLISION_RADIUS = 12
 
 SPRITE_DIRECTORY = Path(__file__).resolve().parent.parent / "sprites" / "boss1"
 
@@ -77,6 +101,9 @@ class Boss:
         direction=dirs.DOWN,
         world_scale=1.0,
         max_hp=BOSS1_MAX_HP,
+        world_width=None,
+        world_height=None,
+        north_boundary=None,
     ):
         self.idle_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "boss1_idle.png")
@@ -99,6 +126,18 @@ class Boss:
         self.slam_eruption_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "boss1_slam_eruption.png")
         )
+        self.charge_ready_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "boss1_charge_ready.png")
+        )
+        self.charge_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "boss1_charge.png")
+        )
+        self.charge_warning_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "boss1_charge_warning.png")
+        )
+        self.world_width = world_width
+        self.world_height = world_height
+        self.north_boundary = north_boundary
         self.x = x
         self.y = y
         self.direction = direction
@@ -127,6 +166,14 @@ class Boss:
         self.slam_eruption = False
         self.slam_eruption_elapsed = 0
         self.slam_cooldown = 0
+        self.charge_warning = False
+        self.charge_warning_elapsed = 0
+        self.charging = False
+        self.charge_elapsed = 0
+        self.charge_length = 0
+        self.charge_traveled = 0
+        self.charge_hit_applied = False
+        self.charge_cooldown = 0
 
     def update(self, player, delta_time):
         self.elapsed_time += delta_time
@@ -136,10 +183,13 @@ class Boss:
             self.shield_sweep_cooldown - delta_time,
         )
         self.slam_cooldown = max(0, self.slam_cooldown - delta_time)
+        self.charge_cooldown = max(0, self.charge_cooldown - delta_time)
         if self.shield_sweep_cooldown < TIME_EPSILON:
             self.shield_sweep_cooldown = 0
         if self.slam_cooldown < TIME_EPSILON:
             self.slam_cooldown = 0
+        if self.charge_cooldown < TIME_EPSILON:
+            self.charge_cooldown = 0
         self.moving = False
 
         if self.slam_eruption:
@@ -166,6 +216,23 @@ class Boss:
                 SLAM_FRAME_COUNT / SLAM_ANIMATION_FPS
             ):
                 self.slamming = False
+            return
+
+        if self.charging:
+            self._update_charge(delta_time)
+            return
+
+        if self.charge_warning:
+            self.charge_warning_elapsed += delta_time
+            if (
+                self.charge_warning_elapsed + TIME_EPSILON
+                >= CHARGE_WARNING_DURATION
+            ):
+                self.charge_warning = False
+                self.charging = True
+                self.charge_elapsed = 0
+                self.charge_traveled = 0
+                self.charge_hit_applied = False
             return
 
         if self.sweep_warning:
@@ -201,25 +268,22 @@ class Boss:
                     + player.collision_radius
                     + BOSS_STANDOFF_DISTANCE * self.movement_scale
                 )
-                if (
-                    distance <= shield_sweep_range
-                    and self.shield_sweep_cooldown == 0
-                ):
-                    self.attack_direction = self.aim_direction
-                    self.attack_sprite_direction = self.direction
-                    self.sweep_warning = True
-                    self.sweep_warning_elapsed = 0
-                    self.shield_sweep_cooldown = SHIELD_SWEEP_COOLDOWN
-                elif (
-                    distance > shield_sweep_range
-                    and distance <= SLAM_MAX_RANGE * self.movement_scale
-                    and self.slam_cooldown == 0
-                ):
-                    self.attack_direction = self.aim_direction
-                    self.attack_sprite_direction = self.direction
-                    self.slam_warning = True
-                    self.slam_warning_elapsed = 0
-                    self.slam_cooldown = SLAM_COOLDOWN
+                in_sweep_range = distance <= shield_sweep_range
+                # 휘두르기 사거리 밖일 때만 내려찍기/돌진을 쓴다.
+                ranged_attacks = []
+                if not in_sweep_range:
+                    if (
+                        distance <= SLAM_MAX_RANGE * self.movement_scale
+                        and self.slam_cooldown == 0
+                    ):
+                        ranged_attacks.append(self._start_slam_warning)
+                    if self.charge_cooldown == 0:
+                        ranged_attacks.append(self._start_charge_warning)
+
+                if in_sweep_range and self.shield_sweep_cooldown == 0:
+                    self._start_sweep_warning()
+                elif ranged_attacks:
+                    random.choice(ranged_attacks)()
                 else:
                     remaining_distance = (
                         distance
@@ -234,12 +298,88 @@ class Boss:
                     if travel_distance > 0:
                         self.x += dx / distance * travel_distance
                         self.y += dy / distance * travel_distance
+                        self.x, self.y = self._clamp_to_world(self.x, self.y)
                         self.moving = True
 
         if self.moving:
             self.walk_animation_time += delta_time
         else:
             self.walk_animation_time = 0
+
+    def _lock_attack_direction(self):
+        self.attack_direction = self.aim_direction
+        self.attack_sprite_direction = self.direction
+
+    def _start_sweep_warning(self):
+        self._lock_attack_direction()
+        self.sweep_warning = True
+        self.sweep_warning_elapsed = 0
+        self.shield_sweep_cooldown = SHIELD_SWEEP_COOLDOWN
+
+    def _start_slam_warning(self):
+        self._lock_attack_direction()
+        self.slam_warning = True
+        self.slam_warning_elapsed = 0
+        self.slam_cooldown = SLAM_COOLDOWN
+
+    def _start_charge_warning(self):
+        self._lock_attack_direction()
+        self.charge_warning = True
+        self.charge_warning_elapsed = 0
+        self.charge_cooldown = CHARGE_COOLDOWN
+        # 벽에 막히면 그만큼 짧게 돌진하고, 예고 화살표도 그 길이로 그린다.
+        self.charge_length = self._charge_length_to_wall(
+            CHARGE_DISTANCE * self.sprite_scale
+        )
+
+    def _update_charge(self, delta_time):
+        self.charge_elapsed += delta_time
+        step = min(
+            CHARGE_SPEED * self.sprite_scale * delta_time,
+            self.charge_length - self.charge_traveled,
+        )
+        direction_x, direction_y = self.attack_direction
+        self.x, self.y = self._clamp_to_world(
+            self.x + direction_x * step,
+            self.y + direction_y * step,
+        )
+        self.charge_traveled += step
+        if self.charge_traveled + TIME_EPSILON >= self.charge_length:
+            self.charging = False
+
+    def _world_limits(self):
+        """보스 중심(self.x, self.y)이 있을 수 있는 범위. 맵 정보가 없으면 None."""
+        if self.world_width is None or self.world_height is None:
+            return None
+        radius = self.collision_radius
+        foot_offset = (IDLE_FOOT_Y - IDLE_FRAME_HEIGHT / 2) * self.sprite_scale
+        max_y = self.world_height - radius
+        if self.north_boundary is not None:
+            max_y = min(max_y, self.north_boundary)
+        return radius, foot_offset, self.world_width - radius, max_y
+
+    def _clamp_to_world(self, x, y):
+        limits = self._world_limits()
+        if limits is None:
+            return x, y
+        min_x, min_y, max_x, max_y = limits
+        return min(max(x, min_x), max_x), min(max(y, min_y), max_y)
+
+    def _charge_length_to_wall(self, length):
+        limits = self._world_limits()
+        if limits is None:
+            return length
+        min_x, min_y, max_x, max_y = limits
+        direction_x, direction_y = self.attack_direction
+        for position, velocity, low, high in (
+            (self.x, direction_x, min_x, max_x),
+            (self.y, direction_y, min_y, max_y),
+        ):
+            if velocity > TIME_EPSILON:
+                length = min(length, (high - position) / velocity)
+            elif velocity < -TIME_EPSILON:
+                length = min(length, (low - position) / velocity)
+        return max(0, length)
 
     def _face_target(self, dx, dy):
         distance = math.hypot(dx, dy)
@@ -277,6 +417,11 @@ class Boss:
             / BASE_SCREEN_HEIGHT
             * self.world_scale
         )
+
+    @property
+    def sprite_scale(self):
+        """스프라이트 1px이 화면에서 몇 px인지."""
+        return self.movement_scale * SPRITE_SCALE
 
     @property
     def collision_radius(self):
@@ -340,6 +485,50 @@ class Boss:
 
     def register_slam_hit(self):
         self.slam_hit_applied = True
+
+    def charge_hits(self, target):
+        """돌진 중 몸에 부딪히면 맞는다 (돌진 한 번에 한 번만)."""
+        if not self.charging or self.charge_hit_applied:
+            return False
+        hit_distance = (
+            self.collision_radius
+            + target.collision_radius
+            + CHARGE_HIT_MARGIN * self.sprite_scale
+        )
+        return math.hypot(target.x - self.x, target.y - self.y) <= hit_distance
+
+    def register_charge_hit(self):
+        self.charge_hit_applied = True
+
+    def _foot_position(self):
+        return self.x, self.y - (
+            IDLE_FOOT_Y - IDLE_FRAME_HEIGHT / 2
+        ) * self.sprite_scale
+
+    def _draw_charge_warning(self, camera_x, camera_y):
+        screen_scale = self.sprite_scale
+        arrow_length = (
+            self.charge_length + BOSS_COLLISION_RADIUS * screen_scale
+        )
+        stretch = arrow_length / (CHARGE_WARNING_ARROW_LENGTH * screen_scale)
+        direction_x, direction_y = self.attack_direction
+        foot_x, foot_y = self._foot_position()
+        frame = int(
+            self.charge_warning_elapsed * CHARGE_WARNING_ANIMATION_FPS
+        ) % CHARGE_WARNING_FRAME_COUNT
+        self.charge_warning_sprite.clip_composite_draw(
+            0,
+            (CHARGE_WARNING_FRAME_COUNT - 1 - frame)
+            * CHARGE_WARNING_FRAME_HEIGHT,
+            CHARGE_WARNING_FRAME_WIDTH,
+            CHARGE_WARNING_FRAME_HEIGHT,
+            math.atan2(direction_y, direction_x),
+            "",
+            foot_x + direction_x * arrow_length / 2 - camera_x,
+            foot_y + direction_y * arrow_length / 2 - camera_y,
+            CHARGE_WARNING_FRAME_WIDTH * screen_scale * stretch,
+            CHARGE_WARNING_FRAME_HEIGHT * screen_scale,
+        )
 
     def _target_in_slam_warning(self, target):
         direction_x, direction_y = self.attack_direction
@@ -440,10 +629,33 @@ class Boss:
                 SWEEP_WARNING_FRAME_HEIGHT * screen_scale,
             )
 
-        if self.slamming:
+        if self.charge_warning:
+            self._draw_charge_warning(camera_x, camera_y)
+
+        foot_y_in_frame = None
+        if self.charging:
+            sprite = self.charge_sprite
+            frame_width = CHARGE_FRAME_WIDTH
+            frame_height = CHARGE_FRAME_HEIGHT
+            foot_y_in_frame = CHARGE_FOOT_Y
+            frame = (
+                int(self.charge_elapsed * CHARGE_ANIMATION_FPS)
+                % CHARGE_FRAME_COUNT
+            )
+        elif self.charge_warning:
+            sprite = self.charge_ready_sprite
+            frame_width = CHARGE_FRAME_WIDTH
+            frame_height = CHARGE_FRAME_HEIGHT
+            foot_y_in_frame = CHARGE_FOOT_Y
+            frame = min(
+                int(self.charge_warning_elapsed * CHARGE_READY_ANIMATION_FPS),
+                CHARGE_READY_FRAME_COUNT - 1,
+            )
+        elif self.slamming:
             sprite = self.shield_slam_sprite
             frame_width = SLAM_FRAME_WIDTH
             frame_height = SLAM_FRAME_HEIGHT
+            foot_y_in_frame = SLAM_FOOT_Y
             frame = min(
                 int(self.slam_elapsed * SLAM_ANIMATION_FPS),
                 SLAM_FRAME_COUNT - 1,
@@ -452,6 +664,7 @@ class Boss:
             sprite = self.shield_sweep_sprite
             frame_width = SHIELD_SWEEP_FRAME_WIDTH
             frame_height = SHIELD_SWEEP_FRAME_HEIGHT
+            foot_y_in_frame = SHIELD_SWEEP_FOOT_Y
             frame = min(
                 int(self.shield_sweep_elapsed * SHIELD_SWEEP_ANIMATION_FPS),
                 SHIELD_SWEEP_FRAME_COUNT - 1,
@@ -473,24 +686,17 @@ class Boss:
                 % IDLE_FRAME_COUNT
             )
         draw_y = self.y
-        if self.shield_sweeping or self.slamming:
+        if foot_y_in_frame is not None:
+            # 128칸 시트는 발 위치가 달라서 64칸 대기 모션과 발을 맞춰 그린다.
             draw_y += (
-                (
-                    SLAM_FOOT_Y
-                    if self.slamming
-                    else SHIELD_SWEEP_FOOT_Y
-                )
-                - (
-                    SLAM_FRAME_HEIGHT
-                    if self.slamming
-                    else SHIELD_SWEEP_FRAME_HEIGHT
-                ) / 2
+                foot_y_in_frame
+                - frame_height / 2
                 - IDLE_FOOT_Y
                 + IDLE_FRAME_HEIGHT / 2
             ) * screen_scale
         sprite_direction = (
             self.attack_sprite_direction
-            if self.slamming or self.shield_sweeping
+            if foot_y_in_frame is not None
             else self.direction
         )
         sprite.clip_draw(
