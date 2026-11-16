@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 import time
 
@@ -33,6 +34,10 @@ SLAM_WARNING_FRAME_HEIGHT = 128
 SLAM_WARNING_FRAME_COUNT = 8
 SLAM_WARNING_ANIMATION_FPS = 8
 SLAM_WARNING_DURATION = SLAM_WARNING_FRAME_COUNT / SLAM_WARNING_ANIMATION_FPS
+SLAM_WARNING_FORWARD_OFFSET = 20
+SLAM_WARNING_DEPTH = 110
+SLAM_WARNING_START_HALF_WIDTH = 18
+SLAM_WARNING_END_HALF_WIDTH = 50
 SLAM_FRAME_WIDTH = 128
 SLAM_FRAME_HEIGHT = 128
 SLAM_FOOT_Y = 118
@@ -63,6 +68,12 @@ DIRECTION_DOWN = 0
 DIRECTION_LEFT = 1
 DIRECTION_RIGHT = 2
 DIRECTION_UP = 3
+_DIRECTION_VECTOR_BY_DIRECTION = (
+    (0, -1),
+    (-1, 0),
+    (1, 0),
+    (0, 1),
+)
 
 
 class Boss:
@@ -91,6 +102,9 @@ class Boss:
         self.x = x
         self.y = y
         self.direction = direction
+        self.aim_direction = _DIRECTION_VECTOR_BY_DIRECTION[direction]
+        self.attack_direction = self.aim_direction
+        self.attack_sprite_direction = direction
         self.world_scale = world_scale
         self.animation_time = 0
         self.walk_animation_time = 0
@@ -104,8 +118,6 @@ class Boss:
         self.shield_sweep_cooldown = 0
         self.slam_warning = False
         self.slam_warning_elapsed = 0
-        self.slam_target_x = None
-        self.slam_target_y = None
         self.slamming = False
         self.slam_elapsed = 0
         self.slam_hit_applied = False
@@ -195,6 +207,8 @@ class Boss:
                     distance <= shield_sweep_range
                     and self.shield_sweep_cooldown == 0
                 ):
+                    self.attack_direction = self.aim_direction
+                    self.attack_sprite_direction = self.direction
                     self.sweep_warning = True
                     self.sweep_warning_elapsed = 0
                     self.shield_sweep_cooldown = SHIELD_SWEEP_COOLDOWN
@@ -203,10 +217,10 @@ class Boss:
                     and distance <= SLAM_MAX_RANGE * self.movement_scale
                     and self.slam_cooldown == 0
                 ):
+                    self.attack_direction = self.aim_direction
+                    self.attack_sprite_direction = self.direction
                     self.slam_warning = True
                     self.slam_warning_elapsed = 0
-                    self.slam_target_x = player.x
-                    self.slam_target_y = player.y
                     self.slam_cooldown = SLAM_COOLDOWN
                 else:
                     remaining_distance = (
@@ -230,10 +244,23 @@ class Boss:
             self.walk_animation_time = 0
 
     def _face_target(self, dx, dy):
+        distance = math.hypot(dx, dy)
+        if not distance:
+            return
+
+        self.aim_direction = (dx / distance, dy / distance)
         if abs(dx) > abs(dy):
             self.direction = DIRECTION_RIGHT if dx > 0 else DIRECTION_LEFT
         else:
             self.direction = DIRECTION_UP if dy > 0 else DIRECTION_DOWN
+
+    def _attack_rotation(self):
+        aim_x, aim_y = self.attack_direction
+        sprite_x, sprite_y = _DIRECTION_VECTOR_BY_DIRECTION[
+            self.attack_sprite_direction
+        ]
+        rotation = math.atan2(aim_y, aim_x) - math.atan2(sprite_y, sprite_x)
+        return (rotation + math.pi) % (2 * math.pi) - math.pi
 
     @property
     def movement_scale(self):
@@ -282,31 +309,61 @@ class Boss:
     def slam_hits(self, target):
         if not self.slam_hit_active:
             return False
-        return self._target_in_front(
-            target,
-            SLAM_MAX_RANGE * self.movement_scale + target.collision_radius,
-        )
+        return self._target_in_slam_warning(target)
 
     def register_slam_hit(self):
         self.slam_hit_applied = True
 
+    def _target_in_slam_warning(self, target):
+        direction_x, direction_y = self.attack_direction
+        target_x, target_y = target.hitbox_center
+        dx = target_x - self.x
+        dy = target_y - self.y
+        screen_scale = self.movement_scale * SPRITE_SCALE
+        forward = (
+            (dx * direction_x + dy * direction_y) / screen_scale
+            - SLAM_WARNING_FORWARD_OFFSET
+        )
+        lateral = abs(dx * direction_y - dy * direction_x) / screen_scale
+        target_radius = target.collision_radius / screen_scale
+        if not (
+            -target_radius
+            <= forward
+            <= SLAM_WARNING_DEPTH + target_radius
+        ):
+            return False
+
+        progress = min(max(forward / SLAM_WARNING_DEPTH, 0), 1)
+        half_width = (
+            SLAM_WARNING_START_HALF_WIDTH
+            + (
+                SLAM_WARNING_END_HALF_WIDTH
+                - SLAM_WARNING_START_HALF_WIDTH
+            )
+            * progress
+        )
+        return lateral <= half_width + target_radius
+
     def _target_in_front(self, target, max_distance):
-        direction_x, direction_y = (
-            (0, -1),
-            (-1, 0),
-            (1, 0),
-            (0, 1),
-        )[self.direction]
-        dx = target.x - self.x
-        dy = target.y - self.y
+        direction_x, direction_y = self.attack_direction
+        target_x, target_y = target.hitbox_center
+        dx = target_x - self.x
+        dy = target_y - self.y
         distance = (dx * dx + dy * dy) ** 0.5
         return (
             0 < distance <= max_distance
             and dx * direction_x + dy * direction_y >= distance * 0.5
         )
 
-    def _slam_effect_position(self):
-        return self.slam_target_x, self.slam_target_y
+    def _slam_effect_position(self, draw_scale=1.0):
+        direction_x, direction_y = self.attack_direction
+        offset = (
+            60 * draw_scale + SLAM_WARNING_FORWARD_OFFSET
+        ) * self.movement_scale * SPRITE_SCALE
+        return (
+            self.x + direction_x * offset,
+            self.y + direction_y * offset,
+        )
 
     def resolve_player_collision(self, player, previous_x, previous_y):
         move_x = player.x - previous_x
@@ -358,11 +415,13 @@ class Boss:
                 - IDLE_FOOT_Y
                 + 8
             ) * screen_scale
-            self.sweep_warning_sprite.clip_draw(
+            self.sweep_warning_sprite.clip_composite_draw(
                 warning_frame * SWEEP_WARNING_FRAME_WIDTH,
-                self.direction * SWEEP_WARNING_FRAME_HEIGHT,
+                self.attack_sprite_direction * SWEEP_WARNING_FRAME_HEIGHT,
                 SWEEP_WARNING_FRAME_WIDTH,
                 SWEEP_WARNING_FRAME_HEIGHT,
+                self._attack_rotation(),
+                "",
                 self.x - camera_x,
                 warning_y - camera_y,
                 SWEEP_WARNING_FRAME_WIDTH * screen_scale,
@@ -417,9 +476,14 @@ class Boss:
                 - IDLE_FOOT_Y
                 + IDLE_FRAME_HEIGHT / 2
             ) * screen_scale
+        sprite_direction = (
+            self.attack_sprite_direction
+            if self.slamming or self.shield_sweeping
+            else self.direction
+        )
         sprite.clip_draw(
             frame * frame_width,
-            self.direction * frame_height,
+            sprite_direction * frame_height,
             frame_width,
             frame_height,
             self.x - camera_x,
@@ -433,22 +497,27 @@ class Boss:
             return
 
         screen_scale = self.movement_scale * SPRITE_SCALE
-        effect_x, effect_y = self._slam_effect_position()
         if self.slam_warning:
+            effect_x, effect_y = self._slam_effect_position()
             frame = int(
                 self.slam_warning_elapsed * SLAM_WARNING_ANIMATION_FPS
             ) % SLAM_WARNING_FRAME_COUNT
-            self.slam_warning_sprite.clip_draw(
+            self.slam_warning_sprite.clip_composite_draw(
                 frame * SLAM_WARNING_FRAME_WIDTH,
-                self.direction * SLAM_WARNING_FRAME_HEIGHT,
+                self.attack_sprite_direction * SLAM_WARNING_FRAME_HEIGHT,
                 SLAM_WARNING_FRAME_WIDTH,
                 SLAM_WARNING_FRAME_HEIGHT,
+                self._attack_rotation(),
+                "",
                 effect_x - camera_x,
                 effect_y - camera_y,
                 SLAM_WARNING_FRAME_WIDTH * screen_scale,
                 SLAM_WARNING_FRAME_HEIGHT * screen_scale,
             )
         if self.slam_eruption:
+            effect_x, effect_y = self._slam_effect_position(
+                SLAM_ERUPTION_DRAW_SCALE
+            )
             frame = min(
                 int(
                     self.slam_eruption_elapsed
@@ -456,11 +525,13 @@ class Boss:
                 ),
                 SLAM_ERUPTION_FRAME_COUNT - 1,
             )
-            self.slam_eruption_sprite.clip_draw(
+            self.slam_eruption_sprite.clip_composite_draw(
                 frame * SLAM_FRAME_WIDTH,
-                self.direction * SLAM_FRAME_HEIGHT,
+                self.attack_sprite_direction * SLAM_FRAME_HEIGHT,
                 SLAM_FRAME_WIDTH,
                 SLAM_FRAME_HEIGHT,
+                self._attack_rotation(),
+                "",
                 effect_x - camera_x,
                 effect_y - camera_y,
                 SLAM_FRAME_WIDTH * screen_scale * SLAM_ERUPTION_DRAW_SCALE,

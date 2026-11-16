@@ -11,6 +11,11 @@ FRAME_COUNT = 12
 RUN_FRAME_COUNT = 8
 ROLL_FRAME_COUNT = 10
 ATTACK_FRAME_COUNT = 12
+SKILL_FRAME_WIDTH = 128
+SKILL_FRAME_HEIGHT = 128
+SKILL_FRAME_COUNT = 18
+SKILL_ANIMATION_FPS = 15
+SKILL_HIT_FRAMES = (3, 6, 9, 12, 15)
 ANIMATION_FPS = 8
 RUN_ANIMATION_FPS = 12
 ROLL_ANIMATION_FPS = 20
@@ -22,19 +27,23 @@ ROLL_DURATION = ROLL_FRAME_COUNT / ROLL_ANIMATION_FPS
 ROLL_SPEED_MULTIPLIER = 2
 ATTACK_DURATION = ATTACK_FRAME_COUNT / ATTACK_ANIMATION_FPS
 PLAYER_ATTACK_DAMAGE = 10
+PLAYER_SKILL_DAMAGE_PER_HIT = int(PLAYER_ATTACK_DAMAGE * 0.6)
 PLAYER_ATTACK_ACTIVE_FRAME_START = 4
 PLAYER_ATTACK_ACTIVE_FRAME_END = 6
 PLAYER_ATTACK_EXTRA_RANGE = 64
+PLAYER_SKILL_EXTRA_RANGE = 64
 BASE_SCREEN_HEIGHT = 600
 DIRECTION_UP = 3
 WALL_COLLISION_CLEARANCE = 32
 PLAYER_COLLISION_RADIUS = 24
+PLAYER_HITBOX_FOOT_OFFSET = 44
 
 SPRITE_DIRECTORY = Path(__file__).resolve().parent.parent / "sprites" / "player"
 
 _RUN_KEYS = {pico2d.SDLK_LSHIFT, pico2d.SDLK_RSHIFT}
 _ROLL_KEY = pico2d.SDLK_SPACE
 _ATTACK_KEY = pico2d.SDLK_z
+_SKILL_KEY = pico2d.SDLK_x
 _DIRECTION_KEYS = {
     pico2d.SDLK_DOWN: (0, -1, 0),
     pico2d.SDLK_RIGHT: (1, 0, 1),
@@ -79,6 +88,9 @@ class Player:
         self.walk_attack_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "player_walk_attack.png")
         )
+        self.skill_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "player_skill1.png")
+        )
 
         self.world_width = (
             pico2d.get_canvas_width() if world_width is None else world_width
@@ -94,7 +106,9 @@ class Player:
         self.pressed_keys = []
         self.roll_key_held = False
         self.attack_key_held = False
+        self.skill_key_held = False
         self.run_pressed = False
+        self.equipped_skill = "combo_slash"
         self.animation_time = 0
         self.last_update = time.perf_counter()
         self.moving = False
@@ -105,6 +119,9 @@ class Player:
         self.attacking = False
         self.attack_elapsed = 0
         self.attack_hit_applied = False
+        self.skill_attacking = False
+        self.skill_elapsed = 0
+        self.skill_hit_count = 0
 
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == _ROLL_KEY:
@@ -119,6 +136,12 @@ class Player:
                 self._start_attack()
         elif event.type == pico2d.SDL_KEYUP and event.key == _ATTACK_KEY:
             self.attack_key_held = False
+        elif event.type == pico2d.SDL_KEYDOWN and event.key == _SKILL_KEY:
+            if not self.skill_key_held:
+                self.skill_key_held = True
+                self._start_skill()
+        elif event.type == pico2d.SDL_KEYUP and event.key == _SKILL_KEY:
+            self.skill_key_held = False
         elif event.type == pico2d.SDL_KEYDOWN and event.key in _RUN_KEYS:
             self.run_pressed = True
         elif event.type == pico2d.SDL_KEYUP and event.key in _RUN_KEYS:
@@ -134,6 +157,7 @@ class Player:
         self.pressed_keys.clear()
         self.roll_key_held = False
         self.attack_key_held = False
+        self.skill_key_held = False
         self.run_pressed = False
 
     @property
@@ -146,6 +170,13 @@ class Player:
             pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT * self.world_scale
         )
         return PLAYER_COLLISION_RADIUS * screen_scale
+
+    @property
+    def hitbox_center(self):
+        screen_scale = (
+            pico2d.get_canvas_height() / BASE_SCREEN_HEIGHT * self.world_scale
+        )
+        return self.x, self.y - PLAYER_HITBOX_FOOT_OFFSET * screen_scale
 
     @property
     def attack_hit_active(self):
@@ -162,6 +193,9 @@ class Player:
         if not self.attack_hit_active:
             return False
 
+        return self._hits_in_front(target, PLAYER_ATTACK_EXTRA_RANGE)
+
+    def _hits_in_front(self, target, extra_range):
         direction_x, direction_y = _DIRECTION_VECTOR_BY_DIRECTION[self.direction]
         dx = target.x - self.x
         dy = target.y - self.y
@@ -169,7 +203,7 @@ class Player:
         max_distance = (
             self.collision_radius
             + target.collision_radius
-            + PLAYER_ATTACK_EXTRA_RANGE
+            + extra_range
             * pico2d.get_canvas_height()
             / BASE_SCREEN_HEIGHT
             * self.world_scale
@@ -179,11 +213,31 @@ class Player:
             and dx * direction_x + dy * direction_y >= distance * 0.5
         )
 
+    def consume_skill_hit_events(self):
+        if not self.skill_attacking:
+            return 0
+
+        frame = int(self.skill_elapsed * SKILL_ANIMATION_FPS)
+        hit_events = 0
+        while (
+            self.skill_hit_count < len(SKILL_HIT_FRAMES)
+            and frame >= SKILL_HIT_FRAMES[self.skill_hit_count]
+        ):
+            self.skill_hit_count += 1
+            hit_events += 1
+        return hit_events
+
+    def skill_hits(self, target):
+        return self.skill_attacking and self._hits_in_front(
+            target,
+            PLAYER_SKILL_EXTRA_RANGE,
+        )
+
     def register_attack_hit(self):
         self.attack_hit_applied = True
 
     def _start_roll(self):
-        if self.rolling or self.attacking:
+        if self.rolling or self.attacking or self.skill_attacking:
             return
 
         dx = 0
@@ -205,7 +259,7 @@ class Player:
         self.roll_elapsed = 0
 
     def _start_attack(self):
-        if self.rolling or self.attacking:
+        if self.rolling or self.attacking or self.skill_attacking:
             return
 
         for key in self.pressed_keys:
@@ -216,6 +270,24 @@ class Player:
         self.attacking = True
         self.attack_elapsed = 0
         self.attack_hit_applied = False
+
+    def _start_skill(self):
+        if (
+            self.equipped_skill is None
+            or self.rolling
+            or self.attacking
+            or self.skill_attacking
+        ):
+            return
+
+        for key in self.pressed_keys:
+            key_dx, key_dy, direction = _DIRECTION_KEYS[key]
+            if key_dx or key_dy:
+                self.direction = direction
+
+        self.skill_attacking = True
+        self.skill_elapsed = 0
+        self.skill_hit_count = 0
 
     def update(self):
         now = time.perf_counter()
@@ -262,6 +334,11 @@ class Player:
             if self.attack_elapsed >= ATTACK_DURATION - 1e-9:
                 self.attack_elapsed = ATTACK_DURATION
                 self.attacking = False
+        if self.skill_attacking:
+            self.skill_elapsed += delta_time
+            if self.skill_elapsed >= SKILL_FRAME_COUNT / SKILL_ANIMATION_FPS:
+                self.skill_elapsed = SKILL_FRAME_COUNT / SKILL_ANIMATION_FPS
+                self.skill_attacking = False
 
         player_width = FRAME_WIDTH * screen_scale
         player_height = FRAME_HEIGHT * screen_scale
@@ -289,30 +366,48 @@ class Player:
                 int(self.roll_elapsed * ROLL_ANIMATION_FPS),
                 ROLL_FRAME_COUNT - 1,
             )
+            frame_width = FRAME_WIDTH
+            frame_height = FRAME_HEIGHT
+        elif self.skill_attacking:
+            sprite = self.skill_sprite
+            frame = min(
+                int(self.skill_elapsed * SKILL_ANIMATION_FPS),
+                SKILL_FRAME_COUNT - 1,
+            )
+            frame_width = SKILL_FRAME_WIDTH
+            frame_height = SKILL_FRAME_HEIGHT
         elif self.attacking:
             sprite = self.walk_attack_sprite if self.moving else self.attack_sprite
             frame = min(
                 int(self.attack_elapsed * ATTACK_ANIMATION_FPS),
                 ATTACK_FRAME_COUNT - 1,
             )
+            frame_width = FRAME_WIDTH
+            frame_height = FRAME_HEIGHT
         elif self.moving and self.run_pressed:
             sprite = self.run_sprite
             frame = int(self.animation_time * RUN_ANIMATION_FPS) % RUN_FRAME_COUNT
+            frame_width = FRAME_WIDTH
+            frame_height = FRAME_HEIGHT
         elif self.moving:
             sprite = self.walk_sprite
             frame = int(self.animation_time * ANIMATION_FPS) % FRAME_COUNT
+            frame_width = FRAME_WIDTH
+            frame_height = FRAME_HEIGHT
         else:
             sprite = self.idle_sprite
             frame = int(self.animation_time * ANIMATION_FPS) % FRAME_COUNT
-        left = frame * FRAME_WIDTH
-        bottom = _SPRITE_ROW_BY_DIRECTION[self.direction] * FRAME_HEIGHT
+            frame_width = FRAME_WIDTH
+            frame_height = FRAME_HEIGHT
+        left = frame * frame_width
+        bottom = _SPRITE_ROW_BY_DIRECTION[self.direction] * frame_height
         sprite.clip_draw(
             left,
             bottom,
-            FRAME_WIDTH,
-            FRAME_HEIGHT,
+            frame_width,
+            frame_height,
             self.x - camera_x,
             self.y - camera_y,
-            FRAME_WIDTH * screen_scale,
-            FRAME_HEIGHT * screen_scale,
+            frame_width * screen_scale,
+            frame_height * screen_scale,
         )

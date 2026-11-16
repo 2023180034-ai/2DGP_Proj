@@ -13,7 +13,12 @@ from camera import Camera
 import game_framework
 from hp_bar import BOSS1_MAX_HP, PLAYER_MAX_HP, BossHpBar, PlayerHpBar
 from map_select_mode import MapSelectMode
-from player import DIRECTION_UP, PLAYER_ATTACK_DAMAGE, Player
+from player import (
+    DIRECTION_UP,
+    PLAYER_ATTACK_DAMAGE,
+    PLAYER_SKILL_DAMAGE_PER_HIT,
+    Player,
+)
 
 
 CAMERA_ZOOM = 1.15
@@ -121,6 +126,12 @@ class IngameMode(game_framework.Mode):
             ):
                 self.boss_hp_bar.damage(PLAYER_ATTACK_DAMAGE)
                 self.player.register_attack_hit()
+            skill_hit_events = self.player.consume_skill_hit_events()
+            if not self.boss_hp_bar.is_dead() and self.player.skill_hits(
+                self.boss
+            ):
+                for _ in range(skill_hit_events):
+                    self.boss_hp_bar.damage(PLAYER_SKILL_DAMAGE_PER_HIT)
             if (
                 self.boss.shield_sweep_hits(self.player)
                 and not self.player.is_invulnerable
