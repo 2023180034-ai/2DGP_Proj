@@ -24,6 +24,10 @@ SHIELD_SWEEP_FOOT_Y = 118
 SHIELD_SWEEP_FRAME_COUNT = 10
 SHIELD_SWEEP_ANIMATION_FPS = 12
 SHIELD_SWEEP_COOLDOWN = 7.0
+SHIELD_SWEEP_ACTIVE_FRAME_START = 4
+SHIELD_SWEEP_ACTIVE_FRAME_END = 6
+BOSS1_SHIELD_SWEEP_DAMAGE = 50
+BOSS1_SHIELD_SWEEP_EXTRA_REACH = 48
 BOSS_STANDOFF_DISTANCE = 16
 TIME_EPSILON = 1e-9
 CHASE_DELAY = 3.0
@@ -66,6 +70,7 @@ class Boss:
         self.sweep_warning_elapsed = 0
         self.shield_sweeping = False
         self.shield_sweep_elapsed = 0
+        self.shield_sweep_hit_applied = False
         self.shield_sweep_cooldown = 0
         self.last_update = time.perf_counter()
 
@@ -100,6 +105,7 @@ class Boss:
                 self.sweep_warning = False
                 self.shield_sweeping = True
                 self.shield_sweep_elapsed = 0
+                self.shield_sweep_hit_applied = False
             return
 
         if self.elapsed_time >= CHASE_DELAY:
@@ -158,6 +164,43 @@ class Boss:
     @property
     def collision_radius(self):
         return BOSS_COLLISION_RADIUS * SPRITE_SCALE * self.movement_scale
+
+    @property
+    def shield_sweep_hit_active(self):
+        if not self.shield_sweeping or self.shield_sweep_hit_applied:
+            return False
+        frame = int(self.shield_sweep_elapsed * SHIELD_SWEEP_ANIMATION_FPS)
+        return (
+            SHIELD_SWEEP_ACTIVE_FRAME_START
+            <= frame
+            <= SHIELD_SWEEP_ACTIVE_FRAME_END
+        )
+
+    def shield_sweep_hits(self, target):
+        if not self.shield_sweep_hit_active:
+            return False
+
+        direction_x, direction_y = (
+            (0, -1),
+            (-1, 0),
+            (1, 0),
+            (0, 1),
+        )[self.direction]
+        dx = target.x - self.x
+        dy = target.y - self.y
+        distance = (dx * dx + dy * dy) ** 0.5
+        max_distance = (
+            self.collision_radius
+            + target.collision_radius
+            + BOSS1_SHIELD_SWEEP_EXTRA_REACH * self.movement_scale
+        )
+        return (
+            0 < distance <= max_distance
+            and dx * direction_x + dy * direction_y >= distance * 0.5
+        )
+
+    def register_shield_sweep_hit(self):
+        self.shield_sweep_hit_applied = True
 
     def resolve_player_collision(self, player, previous_x, previous_y):
         move_x = player.x - previous_x

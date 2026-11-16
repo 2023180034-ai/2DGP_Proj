@@ -3,12 +3,12 @@ import time
 
 import pico2d
 
-from boss import Boss, DIRECTION_DOWN
+from boss import BOSS1_SHIELD_SWEEP_DAMAGE, Boss, DIRECTION_DOWN
 from camera import Camera
 import game_framework
 from hp_bar import BOSS1_MAX_HP, PLAYER_MAX_HP, BossHpBar, PlayerHpBar
 from map_select_mode import MapSelectMode
-from player import DIRECTION_UP, Player
+from player import DIRECTION_UP, PLAYER_ATTACK_DAMAGE, Player
 
 
 CAMERA_ZOOM = 1.15
@@ -110,6 +110,18 @@ class IngameMode(game_framework.Mode):
                 previous_player_x,
                 previous_player_y,
             )
+            if (
+                not self.boss_hp_bar.is_dead()
+                and self.player.attack_hits(self.boss)
+            ):
+                self.boss_hp_bar.damage(PLAYER_ATTACK_DAMAGE)
+                self.player.register_attack_hit()
+            if (
+                self.boss.shield_sweep_hits(self.player)
+                and not self.player.is_invulnerable
+            ):
+                self.player_hp_bar.damage(BOSS1_SHIELD_SWEEP_DAMAGE)
+                self.boss.register_shield_sweep_hit()
             self.boss_hp_bar.update(delta_time)
         self.camera.follow(self.player.x, self.player.y, delta_time)
 

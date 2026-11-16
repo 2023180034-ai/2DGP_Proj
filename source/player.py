@@ -21,6 +21,10 @@ ATTACK_MOVE_SPEED_MULTIPLIER = 0.7
 ROLL_DURATION = ROLL_FRAME_COUNT / ROLL_ANIMATION_FPS
 ROLL_SPEED_MULTIPLIER = 2
 ATTACK_DURATION = ATTACK_FRAME_COUNT / ATTACK_ANIMATION_FPS
+PLAYER_ATTACK_DAMAGE = 10
+PLAYER_ATTACK_ACTIVE_FRAME_START = 4
+PLAYER_ATTACK_ACTIVE_FRAME_END = 6
+PLAYER_ATTACK_EXTRA_RANGE = 64
 BASE_SCREEN_HEIGHT = 600
 DIRECTION_UP = 3
 WALL_COLLISION_CLEARANCE = 32
@@ -100,6 +104,7 @@ class Player:
         self.roll_dy = 0
         self.attacking = False
         self.attack_elapsed = 0
+        self.attack_hit_applied = False
 
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == _ROLL_KEY:
@@ -142,6 +147,41 @@ class Player:
         )
         return PLAYER_COLLISION_RADIUS * screen_scale
 
+    @property
+    def attack_hit_active(self):
+        if not self.attacking or self.attack_hit_applied:
+            return False
+        frame = int(self.attack_elapsed * ATTACK_ANIMATION_FPS)
+        return (
+            PLAYER_ATTACK_ACTIVE_FRAME_START
+            <= frame
+            <= PLAYER_ATTACK_ACTIVE_FRAME_END
+        )
+
+    def attack_hits(self, target):
+        if not self.attack_hit_active:
+            return False
+
+        direction_x, direction_y = _DIRECTION_VECTOR_BY_DIRECTION[self.direction]
+        dx = target.x - self.x
+        dy = target.y - self.y
+        distance = math.hypot(dx, dy)
+        max_distance = (
+            self.collision_radius
+            + target.collision_radius
+            + PLAYER_ATTACK_EXTRA_RANGE
+            * pico2d.get_canvas_height()
+            / BASE_SCREEN_HEIGHT
+            * self.world_scale
+        )
+        return (
+            0 < distance <= max_distance
+            and dx * direction_x + dy * direction_y >= distance * 0.5
+        )
+
+    def register_attack_hit(self):
+        self.attack_hit_applied = True
+
     def _start_roll(self):
         if self.rolling or self.attacking:
             return
@@ -175,6 +215,7 @@ class Player:
 
         self.attacking = True
         self.attack_elapsed = 0
+        self.attack_hit_applied = False
 
     def update(self):
         now = time.perf_counter()
