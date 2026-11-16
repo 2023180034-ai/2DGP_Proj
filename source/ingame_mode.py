@@ -50,7 +50,7 @@ class IngameMode(game_framework.Mode):
         self.upgrade_window = UpgradeWindow()
         self.game_over = GameOverUI()
         self.skill_hud = SkillHud("slash", cooldown=SKILL_COOLDOWN, key_label="X")
-        self.reset_map("test")
+        self.reset_map("boss1")  # 게임은 보스1 맵에서 시작 (테스트 맵은 M 키로)
 
     def reset_map(self, map_id):
         background = pico2d.load_image(str(MAP_IMAGE_PATHS[map_id]))
