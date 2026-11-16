@@ -3,6 +3,7 @@ from pathlib import Path
 import pico2d
 
 import direction as dirs
+from status_window import stat_value
 
 
 FRAME_WIDTH = 128
@@ -29,7 +30,8 @@ ATTACK_DURATION = ATTACK_FRAME_COUNT / ATTACK_ANIMATION_FPS
 PLAYER_MAX_HP = 100
 PLAYER_GOLD_RATE = 1.0  # 획득 골드 = 보스에게 입힌 피해 x 배율
 PLAYER_ATTACK_DAMAGE = 10
-PLAYER_SKILL_DAMAGE_PER_HIT = int(PLAYER_ATTACK_DAMAGE * 0.6)
+PLAYER_SKILL_DAMAGE_RATIO = 0.6  # 스킬 한 타 = 공격력 x 0.6
+PLAYER_SKILL_DAMAGE_PER_HIT = int(PLAYER_ATTACK_DAMAGE * PLAYER_SKILL_DAMAGE_RATIO)
 PLAYER_ATTACK_ACTIVE_FRAME_START = 4
 PLAYER_ATTACK_ACTIVE_FRAME_END = 6
 PLAYER_ATTACK_EXTRA_RANGE = 64
@@ -97,9 +99,7 @@ class Player:
         self.x = self.world_width / 2 if spawn_x is None else spawn_x
         self.y = self.world_height / 2 if spawn_y is None else spawn_y
         self.direction = direction
-        self.max_hp = PLAYER_MAX_HP
-        self.hp = PLAYER_MAX_HP
-        self.gold_rate = PLAYER_GOLD_RATE
+        self.apply_stats({})
         self.pressed_keys = []
         self.roll_key_held = False
         self.attack_key_held = False
@@ -155,6 +155,28 @@ class Player:
         self.attack_key_held = False
         self.skill_key_held = False
         self.run_pressed = False
+
+    def apply_stats(self, levels, refill=True):
+        """강화 레벨({'hp': 3, ...})로 능력치를 다시 계산한다. 빠진 키는 0레벨.
+
+        이동 속도·공격 속도는 개발 문서 값(기본 5, 기본 초당 1회) 대비 배율로 적용한다.
+        """
+        def value(key):
+            return stat_value(key, levels.get(key, 0))
+
+        self.max_hp = int(value('hp'))
+        self.hp = self.max_hp if refill else min(self.hp, self.max_hp)
+        self.attack_damage = value('atk')
+        self.attack_speed = value('atk_speed') / stat_value('atk_speed', 0)
+        self.stamina = value('stamina')  # 스태미나 시스템은 아직 없음 (값만 보관)
+        self.move_speed_multiplier = (
+            value('move_speed') / stat_value('move_speed', 0)
+        )
+        self.gold_rate = value('gold_rate')
+
+    @property
+    def skill_damage_per_hit(self):
+        return int(self.attack_damage * PLAYER_SKILL_DAMAGE_RATIO)
 
     @property
     def is_invulnerable(self):
@@ -328,13 +350,19 @@ class Player:
                     speed_multiplier = (
                         RUN_SPEED_MULTIPLIER if self.run_pressed else 1
                     )
-                speed = MOVE_SPEED * speed_multiplier * screen_scale
+                speed = (
+                    MOVE_SPEED
+                    * speed_multiplier
+                    * self.move_speed_multiplier
+                    * screen_scale
+                )
                 distance = speed * delta_time / math.hypot(dx, dy)
                 self.x += dx * distance
                 self.y += dy * distance
 
         if self.attacking:
-            self.attack_elapsed += delta_time
+            # 공격 속도가 오르면 공격 모션(과 판정 프레임)이 그만큼 빨리 진행된다.
+            self.attack_elapsed += delta_time * self.attack_speed
             if self.attack_elapsed >= ATTACK_DURATION - 1e-9:
                 self.attack_elapsed = ATTACK_DURATION
                 self.attacking = False

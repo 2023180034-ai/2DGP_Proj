@@ -16,11 +16,10 @@ from game_over import GameOverUI
 from gold_display import GoldDisplay
 from hp_bar import BossHpBar, PlayerHpBar
 from map_select_mode import MapSelectMode
-from player import (
-    PLAYER_ATTACK_DAMAGE,
-    PLAYER_SKILL_DAMAGE_PER_HIT,
-    Player,
-)
+from player import Player
+from status_window import StatusWindow
+from upgrade_window import UpgradeWindow
+from window_modes import StatusMode, UpgradeMode
 
 
 CAMERA_ZOOM = 1.15
@@ -43,6 +42,11 @@ class IngameMode(game_framework.Mode):
     def enter(self):
         # 골드는 맵을 바꿔도 유지된다 (게임을 끄면 사라짐, 저장은 아직 없음)
         self.gold_ui = GoldDisplay(gold=0)
+        # 능력치 강화 레벨과 특수 재화도 골드처럼 맵을 바꿔도 유지 (게임을 끄면 초기화)
+        self.levels = {}
+        self.special = 0
+        self.status_window = StatusWindow()
+        self.upgrade_window = UpgradeWindow()
         self.game_over = GameOverUI()
         self.reset_map("test")
 
@@ -84,6 +88,7 @@ class IngameMode(game_framework.Mode):
             world_scale=CAMERA_ZOOM,
             north_boundary=north_boundary,
         )
+        self.player.apply_stats(self.levels)
         self.camera = Camera(
             world_width,
             world_height,
@@ -108,6 +113,8 @@ class IngameMode(game_framework.Mode):
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_ESCAPE:
             game_framework.quit()
+        elif event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_c:
+            game_framework.push_mode(StatusMode(self))
         elif self.game_over.active:
             self._handle_game_over_event(event)
         elif event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_m:
@@ -120,9 +127,14 @@ class IngameMode(game_framework.Mode):
         result = self.game_over.handle_event(event)
         if result == "restart":
             self.reset_map("boss1")
+        elif result == "upgrade":
+            game_framework.push_mode(UpgradeMode(self))
         elif result == "quit":
             game_framework.quit()
-        # "upgrade"(강화)는 아직 연결하지 않음
+
+    def apply_upgrades(self):
+        """강화 직후: 지금 플레이어 능력치에도 반영 (체력은 다시 시작할 때 가득 참)."""
+        self.player.apply_stats(self.levels, refill=False)
 
     def pause(self):
         self.player.clear_input()
@@ -182,12 +194,12 @@ class IngameMode(game_framework.Mode):
         if boss.is_dead or player.is_dead or boss.is_airborne:
             return
         if player.attack_hits(boss):
-            self._damage_boss(boss, PLAYER_ATTACK_DAMAGE)
+            self._damage_boss(boss, player.attack_damage)
             player.register_attack_hit()
         if skill_hit_events and player.skill_hits(boss):
             self._damage_boss(
                 boss,
-                PLAYER_SKILL_DAMAGE_PER_HIT * skill_hit_events,
+                player.skill_damage_per_hit * skill_hit_events,
             )
 
     def _apply_boss_attacks(self, boss, player):
