@@ -28,6 +28,27 @@ SHIELD_SWEEP_ACTIVE_FRAME_START = 4
 SHIELD_SWEEP_ACTIVE_FRAME_END = 6
 BOSS1_SHIELD_SWEEP_DAMAGE = 50
 BOSS1_SHIELD_SWEEP_EXTRA_REACH = 48
+SLAM_WARNING_FRAME_WIDTH = 128
+SLAM_WARNING_FRAME_HEIGHT = 128
+SLAM_WARNING_FRAME_COUNT = 8
+SLAM_WARNING_ANIMATION_FPS = 8
+SLAM_WARNING_DURATION = SLAM_WARNING_FRAME_COUNT / SLAM_WARNING_ANIMATION_FPS
+SLAM_FRAME_WIDTH = 128
+SLAM_FRAME_HEIGHT = 128
+SLAM_FOOT_Y = 118
+SLAM_FRAME_COUNT = 12
+SLAM_ANIMATION_FPS = 12
+SLAM_IMPACT_FRAME = 5
+SLAM_IMPACT_FRAME_END = 6
+SLAM_ERUPTION_FRAME_COUNT = 10
+SLAM_ERUPTION_ANIMATION_FPS = 12
+SLAM_ERUPTION_DURATION = (
+    SLAM_ERUPTION_FRAME_COUNT / SLAM_ERUPTION_ANIMATION_FPS
+)
+SLAM_ERUPTION_DRAW_SCALE = 1.25
+SLAM_COOLDOWN = 9.0
+SLAM_MAX_RANGE = 256
+BOSS1_SLAM_DAMAGE = 90
 BOSS_STANDOFF_DISTANCE = 16
 TIME_EPSILON = 1e-9
 CHASE_DELAY = 3.0
@@ -58,6 +79,15 @@ class Boss:
         self.sweep_warning_sprite = pico2d.load_image(
             str(SPRITE_DIRECTORY / "boss1_sweep_warning.png")
         )
+        self.shield_slam_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "boss1_shield_slam.png")
+        )
+        self.slam_warning_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "boss1_slam_warning.png")
+        )
+        self.slam_eruption_sprite = pico2d.load_image(
+            str(SPRITE_DIRECTORY / "boss1_slam_eruption.png")
+        )
         self.x = x
         self.y = y
         self.direction = direction
@@ -72,6 +102,17 @@ class Boss:
         self.shield_sweep_elapsed = 0
         self.shield_sweep_hit_applied = False
         self.shield_sweep_cooldown = 0
+        self.slam_warning = False
+        self.slam_warning_elapsed = 0
+        self.slam_target_x = None
+        self.slam_target_y = None
+        self.slamming = False
+        self.slam_elapsed = 0
+        self.slam_hit_applied = False
+        self.slam_impact_started = False
+        self.slam_eruption = False
+        self.slam_eruption_elapsed = 0
+        self.slam_cooldown = 0
         self.last_update = time.perf_counter()
 
     def update(self, player):
@@ -84,9 +125,17 @@ class Boss:
             0,
             self.shield_sweep_cooldown - delta_time,
         )
+        self.slam_cooldown = max(0, self.slam_cooldown - delta_time)
         if self.shield_sweep_cooldown < TIME_EPSILON:
             self.shield_sweep_cooldown = 0
+        if self.slam_cooldown < TIME_EPSILON:
+            self.slam_cooldown = 0
         self.moving = False
+
+        if self.slam_eruption:
+            self.slam_eruption_elapsed += delta_time
+            if self.slam_eruption_elapsed >= SLAM_ERUPTION_DURATION:
+                self.slam_eruption = False
 
         if self.shield_sweeping:
             self.shield_sweep_elapsed += delta_time
@@ -94,6 +143,19 @@ class Boss:
                 SHIELD_SWEEP_FRAME_COUNT / SHIELD_SWEEP_ANIMATION_FPS
             ):
                 self.shield_sweeping = False
+            return
+
+        if self.slamming:
+            self.slam_elapsed += delta_time
+            slam_frame = int(self.slam_elapsed * SLAM_ANIMATION_FPS)
+            if not self.slam_impact_started and slam_frame >= SLAM_IMPACT_FRAME:
+                self.slam_impact_started = True
+                self.slam_eruption = True
+                self.slam_eruption_elapsed = 0
+            if self.slam_elapsed + TIME_EPSILON >= (
+                SLAM_FRAME_COUNT / SLAM_ANIMATION_FPS
+            ):
+                self.slamming = False
             return
 
         if self.sweep_warning:
@@ -106,6 +168,16 @@ class Boss:
                 self.shield_sweeping = True
                 self.shield_sweep_elapsed = 0
                 self.shield_sweep_hit_applied = False
+            return
+
+        if self.slam_warning:
+            self.slam_warning_elapsed += delta_time
+            if self.slam_warning_elapsed + TIME_EPSILON >= SLAM_WARNING_DURATION:
+                self.slam_warning = False
+                self.slamming = True
+                self.slam_elapsed = 0
+                self.slam_hit_applied = False
+                self.slam_impact_started = False
             return
 
         if self.elapsed_time >= CHASE_DELAY:
@@ -126,6 +198,16 @@ class Boss:
                     self.sweep_warning = True
                     self.sweep_warning_elapsed = 0
                     self.shield_sweep_cooldown = SHIELD_SWEEP_COOLDOWN
+                elif (
+                    distance > shield_sweep_range
+                    and distance <= SLAM_MAX_RANGE * self.movement_scale
+                    and self.slam_cooldown == 0
+                ):
+                    self.slam_warning = True
+                    self.slam_warning_elapsed = 0
+                    self.slam_target_x = player.x
+                    self.slam_target_y = player.y
+                    self.slam_cooldown = SLAM_COOLDOWN
                 else:
                     remaining_distance = (
                         distance
@@ -180,6 +262,35 @@ class Boss:
         if not self.shield_sweep_hit_active:
             return False
 
+        max_distance = (
+            self.collision_radius
+            + target.collision_radius
+            + BOSS1_SHIELD_SWEEP_EXTRA_REACH * self.movement_scale
+        )
+        return self._target_in_front(target, max_distance)
+
+    def register_shield_sweep_hit(self):
+        self.shield_sweep_hit_applied = True
+
+    @property
+    def slam_hit_active(self):
+        if not self.slamming or self.slam_hit_applied:
+            return False
+        frame = int(self.slam_elapsed * SLAM_ANIMATION_FPS)
+        return SLAM_IMPACT_FRAME <= frame <= SLAM_IMPACT_FRAME_END
+
+    def slam_hits(self, target):
+        if not self.slam_hit_active:
+            return False
+        return self._target_in_front(
+            target,
+            SLAM_MAX_RANGE * self.movement_scale + target.collision_radius,
+        )
+
+    def register_slam_hit(self):
+        self.slam_hit_applied = True
+
+    def _target_in_front(self, target, max_distance):
         direction_x, direction_y = (
             (0, -1),
             (-1, 0),
@@ -189,18 +300,13 @@ class Boss:
         dx = target.x - self.x
         dy = target.y - self.y
         distance = (dx * dx + dy * dy) ** 0.5
-        max_distance = (
-            self.collision_radius
-            + target.collision_radius
-            + BOSS1_SHIELD_SWEEP_EXTRA_REACH * self.movement_scale
-        )
         return (
             0 < distance <= max_distance
             and dx * direction_x + dy * direction_y >= distance * 0.5
         )
 
-    def register_shield_sweep_hit(self):
-        self.shield_sweep_hit_applied = True
+    def _slam_effect_position(self):
+        return self.slam_target_x, self.slam_target_y
 
     def resolve_player_collision(self, player, previous_x, previous_y):
         move_x = player.x - previous_x
@@ -263,7 +369,15 @@ class Boss:
                 SWEEP_WARNING_FRAME_HEIGHT * screen_scale,
             )
 
-        if self.shield_sweeping:
+        if self.slamming:
+            sprite = self.shield_slam_sprite
+            frame_width = SLAM_FRAME_WIDTH
+            frame_height = SLAM_FRAME_HEIGHT
+            frame = min(
+                int(self.slam_elapsed * SLAM_ANIMATION_FPS),
+                SLAM_FRAME_COUNT - 1,
+            )
+        elif self.shield_sweeping:
             sprite = self.shield_sweep_sprite
             frame_width = SHIELD_SWEEP_FRAME_WIDTH
             frame_height = SHIELD_SWEEP_FRAME_HEIGHT
@@ -288,10 +402,18 @@ class Boss:
                 % IDLE_FRAME_COUNT
             )
         draw_y = self.y
-        if self.shield_sweeping:
+        if self.shield_sweeping or self.slamming:
             draw_y += (
-                SHIELD_SWEEP_FOOT_Y
-                - SHIELD_SWEEP_FRAME_HEIGHT / 2
+                (
+                    SLAM_FOOT_Y
+                    if self.slamming
+                    else SHIELD_SWEEP_FOOT_Y
+                )
+                - (
+                    SLAM_FRAME_HEIGHT
+                    if self.slamming
+                    else SHIELD_SWEEP_FRAME_HEIGHT
+                ) / 2
                 - IDLE_FOOT_Y
                 + IDLE_FRAME_HEIGHT / 2
             ) * screen_scale
@@ -305,3 +427,42 @@ class Boss:
             frame_width * screen_scale,
             frame_height * screen_scale,
         )
+
+    def draw_slam_effects(self, camera_x=0, camera_y=0):
+        if not (self.slam_warning or self.slam_eruption):
+            return
+
+        screen_scale = self.movement_scale * SPRITE_SCALE
+        effect_x, effect_y = self._slam_effect_position()
+        if self.slam_warning:
+            frame = int(
+                self.slam_warning_elapsed * SLAM_WARNING_ANIMATION_FPS
+            ) % SLAM_WARNING_FRAME_COUNT
+            self.slam_warning_sprite.clip_draw(
+                frame * SLAM_WARNING_FRAME_WIDTH,
+                self.direction * SLAM_WARNING_FRAME_HEIGHT,
+                SLAM_WARNING_FRAME_WIDTH,
+                SLAM_WARNING_FRAME_HEIGHT,
+                effect_x - camera_x,
+                effect_y - camera_y,
+                SLAM_WARNING_FRAME_WIDTH * screen_scale,
+                SLAM_WARNING_FRAME_HEIGHT * screen_scale,
+            )
+        if self.slam_eruption:
+            frame = min(
+                int(
+                    self.slam_eruption_elapsed
+                    * SLAM_ERUPTION_ANIMATION_FPS
+                ),
+                SLAM_ERUPTION_FRAME_COUNT - 1,
+            )
+            self.slam_eruption_sprite.clip_draw(
+                frame * SLAM_FRAME_WIDTH,
+                self.direction * SLAM_FRAME_HEIGHT,
+                SLAM_FRAME_WIDTH,
+                SLAM_FRAME_HEIGHT,
+                effect_x - camera_x,
+                effect_y - camera_y,
+                SLAM_FRAME_WIDTH * screen_scale * SLAM_ERUPTION_DRAW_SCALE,
+                SLAM_FRAME_HEIGHT * screen_scale * SLAM_ERUPTION_DRAW_SCALE,
+            )

@@ -3,7 +3,12 @@ import time
 
 import pico2d
 
-from boss import BOSS1_SHIELD_SWEEP_DAMAGE, Boss, DIRECTION_DOWN
+from boss import (
+    BOSS1_SHIELD_SWEEP_DAMAGE,
+    BOSS1_SLAM_DAMAGE,
+    Boss,
+    DIRECTION_DOWN,
+)
 from camera import Camera
 import game_framework
 from hp_bar import BOSS1_MAX_HP, PLAYER_MAX_HP, BossHpBar, PlayerHpBar
@@ -122,6 +127,12 @@ class IngameMode(game_framework.Mode):
             ):
                 self.player_hp_bar.damage(BOSS1_SHIELD_SWEEP_DAMAGE)
                 self.boss.register_shield_sweep_hit()
+            if (
+                self.boss.slam_hits(self.player)
+                and not self.player.is_invulnerable
+            ):
+                self.player_hp_bar.damage(BOSS1_SLAM_DAMAGE)
+                self.boss.register_slam_hit()
             self.boss_hp_bar.update(delta_time)
         self.camera.follow(self.player.x, self.player.y, delta_time)
 
@@ -137,6 +148,8 @@ class IngameMode(game_framework.Mode):
         if self.boss is not None:
             self.boss.draw(self.camera.x, self.camera.y)
         self.player.draw(self.camera.x, self.camera.y)
+        if self.boss is not None:
+            self.boss.draw_slam_effects(self.camera.x, self.camera.y)
         self.player_hp_bar.draw()
         if self.boss_hp_bar is not None:
             self.boss_hp_bar.draw()
