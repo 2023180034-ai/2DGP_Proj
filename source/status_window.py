@@ -10,8 +10,10 @@ from pathlib import Path
 
 from pico2d import load_image
 
+import game_framework
+
 IMAGE_DIR = str(Path(__file__).resolve().parent.parent / 'sprites' / 'ui') + '/'
-WINDOW_POS = (990, 540)            # TODO: 위치 확정 후 수정 (창 가운데, 화면 좌표. 1980x1080 기준 화면 가운데)
+WINDOW_POS = (game_framework.SCREEN_WIDTH // 2, game_framework.SCREEN_HEIGHT // 2)  # 화면 가운데
 
 # ---------------- 능력치 규칙 (개발 문서) ----------------
 # 키, 기본값, 레벨업당 증가, 최대 레벨(None = 제한 없음), 표시 소수 자리

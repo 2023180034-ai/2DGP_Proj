@@ -4,7 +4,7 @@ import pico2d
 import pico2d.pico2d as pico2d_core
 
 
-SCREEN_WIDTH = 1980
+SCREEN_WIDTH = 1920
 SCREEN_HEIGHT = 1080
 FRAME_RATE = 60
 MAX_DELTA_TIME = 0.1

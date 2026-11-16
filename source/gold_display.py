@@ -14,8 +14,8 @@ import game_framework
 
 IMAGE_DIR = str(Path(__file__).resolve().parent.parent / 'sprites' / 'ui') + '/'
 SCALE = 3
-# 오른쪽 아래 (1980x1080 기준, 패널 234x48 가운데). 아래에 '+N'이 뜰 자리를 남겨 둠
-GOLD_POS = (1980 - 20 - 78 * 3 // 2, 70)
+# 오른쪽 아래 (패널 234x48 가운데, 오른쪽 여백 20px). 아래에 '+N'이 뜰 자리를 남겨 둠
+GOLD_POS = (game_framework.SCREEN_WIDTH - 20 - 78 * 3 // 2, 70)
 
 PANEL_W, PANEL_H = 78, 16          # 패널 원본 크기
 COIN = 12                          # 동전 한 칸 크기 (6프레임)

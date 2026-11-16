@@ -19,7 +19,7 @@ from pico2d import (load_image, SDL_KEYDOWN, SDLK_UP, SDLK_DOWN, SDLK_RETURN,
 import game_framework
 
 IMAGE_DIR = str(Path(__file__).resolve().parent.parent / 'sprites' / 'ui') + '/'
-SCREEN_W, SCREEN_H = 1980, 1080    # 논리 해상도 (개발 문서)
+SCREEN_W, SCREEN_H = game_framework.SCREEN_WIDTH, game_framework.SCREEN_HEIGHT  # 논리 해상도
 
 # ---------------- game_over.png 안 위치 (pico2d 아래 기준: left, bottom, w, h) ----------------
 SHEET_H = 332

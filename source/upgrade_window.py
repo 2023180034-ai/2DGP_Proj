@@ -16,7 +16,7 @@ import game_framework
 from status_window import STAT_RULES, stat_value, is_max
 
 IMAGE_DIR = str(Path(__file__).resolve().parent.parent / 'sprites' / 'ui') + '/'
-WINDOW_POS = (990, 540)            # TODO: 위치 확정 후 수정 (창 가운데, 화면 좌표)
+WINDOW_POS = (game_framework.SCREEN_WIDTH // 2, game_framework.SCREEN_HEIGHT // 2)  # 화면 가운데
 
 
 # ---------------- 강화 비용 (임시) ----------------

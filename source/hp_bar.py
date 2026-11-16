@@ -3,10 +3,12 @@ import random
 
 import pico2d
 
+import game_framework
+
 
 SCALE = 3
 FONT_PATH = r"C:\Windows\Fonts\malgun.ttf"
-BOSS_POS = (990, 1000)
+BOSS_POS = (game_framework.SCREEN_WIDTH // 2, 1000)  # 화면 위쪽 가운데
 PLAYER_POS = (215, 38)
 
 CHIP_DELAY = 0.6
