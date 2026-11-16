@@ -93,12 +93,12 @@ class IngameMode(game_framework.Mode):
         previous_player_y = self.player.y
         self.player.update()
         if self.boss is not None:
+            self.boss.update(self.player)
             self.boss.resolve_player_collision(
                 self.player,
                 previous_player_x,
                 previous_player_y,
             )
-            self.boss.update()
         now = time.perf_counter()
         delta_time = min(now - self.last_camera_update, 0.1)
         self.last_camera_update = now
