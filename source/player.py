@@ -27,6 +27,7 @@ ROLL_DURATION = ROLL_FRAME_COUNT / ROLL_ANIMATION_FPS
 ROLL_SPEED_MULTIPLIER = 2
 ATTACK_DURATION = ATTACK_FRAME_COUNT / ATTACK_ANIMATION_FPS
 PLAYER_MAX_HP = 100
+PLAYER_GOLD_RATE = 1.0  # 획득 골드 = 보스에게 입힌 피해 x 배율
 PLAYER_ATTACK_DAMAGE = 10
 PLAYER_SKILL_DAMAGE_PER_HIT = int(PLAYER_ATTACK_DAMAGE * 0.6)
 PLAYER_ATTACK_ACTIVE_FRAME_START = 4
@@ -98,6 +99,7 @@ class Player:
         self.direction = direction
         self.max_hp = PLAYER_MAX_HP
         self.hp = PLAYER_MAX_HP
+        self.gold_rate = PLAYER_GOLD_RATE
         self.pressed_keys = []
         self.roll_key_held = False
         self.attack_key_held = False

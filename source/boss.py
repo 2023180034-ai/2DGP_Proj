@@ -507,10 +507,12 @@ class Boss:
         return self.hp <= 0
 
     def take_damage(self, amount):
+        """피해를 주고, 실제로 깎인 체력을 돌려준다 (이미 죽었으면 0)."""
         if self.is_dead:
-            return False
-        self.hp = max(0, self.hp - amount)
-        return True
+            return 0
+        dealt = min(self.hp, amount)
+        self.hp -= dealt
+        return dealt
 
     @property
     def movement_scale(self):

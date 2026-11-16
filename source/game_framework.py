@@ -11,6 +11,7 @@ MAX_DELTA_TIME = 0.1
 
 _mode_stack = []
 _running = False
+frame_time = 0.0  # 이번 프레임 시간 (초). update(delta_time)에 넘기는 값과 같음
 
 
 class Mode:
@@ -72,7 +73,7 @@ def quit():
 
 
 def run(start_mode):
-    global _running
+    global _running, frame_time
 
     if _running:
         raise RuntimeError("The game framework is already running.")
@@ -106,6 +107,7 @@ def run(start_mode):
             now = time.perf_counter()
             delta_time = min(now - last_frame_time, MAX_DELTA_TIME)
             last_frame_time = now
+            frame_time = delta_time
 
             _mode_stack[-1].update(delta_time)
             pico2d.clear_canvas()

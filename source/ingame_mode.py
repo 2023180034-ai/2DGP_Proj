@@ -12,6 +12,7 @@ from boss import (
 from camera import Camera
 import direction as dirs
 import game_framework
+from gold_display import GoldDisplay
 from hp_bar import BossHpBar, PlayerHpBar
 from map_select_mode import MapSelectMode
 from player import (
@@ -39,6 +40,8 @@ MAP_IMAGE_PATHS = {
 
 class IngameMode(game_framework.Mode):
     def enter(self):
+        # 골드는 맵을 바꿔도 유지된다 (게임을 끄면 사라짐, 저장은 아직 없음)
+        self.gold_ui = GoldDisplay(gold=0)
         self.reset_map("test")
 
     def reset_map(self, map_id):
@@ -95,6 +98,9 @@ class IngameMode(game_framework.Mode):
             if boss is not None
             else None
         )
+        # 이번 도전에서 보스에게 입힌 피해. 플레이어나 보스가 죽으면 골드로 정산
+        self.run_damage = 0
+        self.run_settled = False
 
     def handle_event(self, event):
         if event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_ESCAPE:
@@ -132,19 +138,35 @@ class IngameMode(game_framework.Mode):
             if not boss.is_dead:
                 self._apply_boss_attacks(boss, player)
             self.boss_hp_bar.update(delta_time)
+            if player.is_dead or boss.is_dead:
+                self._settle_run()
 
         self.player_hp_bar.update(delta_time)
+        self.gold_ui.update()
         self.camera.follow(player.x, player.y, delta_time)
+
+    def _damage_boss(self, boss, amount):
+        self.run_damage += boss.take_damage(amount)
+
+    def _settle_run(self):
+        """도전이 끝나면(플레이어 사망 또는 보스 처치) 입힌 피해를 골드로 적립."""
+        if self.run_settled:
+            return
+        self.run_settled = True
+        self.gold_ui.add(self.run_damage * self.player.gold_rate)
 
     def _apply_player_attacks(self, player, boss):
         skill_hit_events = player.consume_skill_hit_events()
         if boss.is_dead or player.is_dead or boss.is_airborne:
             return
         if player.attack_hits(boss):
-            boss.take_damage(PLAYER_ATTACK_DAMAGE)
+            self._damage_boss(boss, PLAYER_ATTACK_DAMAGE)
             player.register_attack_hit()
         if skill_hit_events and player.skill_hits(boss):
-            boss.take_damage(PLAYER_SKILL_DAMAGE_PER_HIT * skill_hit_events)
+            self._damage_boss(
+                boss,
+                PLAYER_SKILL_DAMAGE_PER_HIT * skill_hit_events,
+            )
 
     def _apply_boss_attacks(self, boss, player):
         if boss.shield_sweep_hits(player) and player.take_damage(
@@ -175,3 +197,4 @@ class IngameMode(game_framework.Mode):
         self.player_hp_bar.draw()
         if self.boss_hp_bar is not None:
             self.boss_hp_bar.draw()
+        self.gold_ui.draw()
